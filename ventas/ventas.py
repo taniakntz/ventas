@@ -23,23 +23,30 @@ else:
 
 # --- FUNCION CALCULO TOTAL ---
 def calcular_total(batata, membrillo):
-    total = 0
-    for cantidad in [batata, membrillo]:
-        if cantidad == 0.5:
-            total += precio_media
-        elif cantidad == 0.25:
-            total += precio_media / 2
-        elif cantidad == 0.75:
-            total += precio_media + (precio_media / 2)
-        elif cantidad >= 1:
-            total += int(cantidad) * precio_docena
-            if cantidad % 1 == 0.5:
-                total += precio_media
-            elif cantidad % 1 == 0.25:
+    total_docenas = batata + membrillo
+    if total_docenas == 1.0:
+        return precio_docena
+    elif batata == 0.5 and membrillo == 0.5:
+        return precio_docena
+    else:
+        total = 0
+        for cantidad in [batata, membrillo]:
+            if cantidad == 0.25:
                 total += precio_media / 2
-            elif cantidad % 1 == 0.75:
+            elif cantidad == 0.5:
+                total += precio_media
+            elif cantidad == 0.75:
                 total += precio_media + (precio_media / 2)
-    return total
+            elif cantidad >= 1:
+                total += int(cantidad) * precio_docena
+                resto = cantidad % 1
+                if resto == 0.5:
+                    total += precio_media
+                elif resto == 0.25:
+                    total += precio_media / 2
+                elif resto == 0.75:
+                    total += precio_media + (precio_media / 2)
+        return total
 
 # --- AGREGAR NUEVA VENTA ---
 st.subheader("📝 Agregar cliente")
