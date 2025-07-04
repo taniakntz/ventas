@@ -21,24 +21,36 @@ if os.path.exists(data_file):
 else:
     df = pd.DataFrame(columns=["Cliente", "Batata", "Membrillo", "Total ($)"])
 
+# --- FUNCION CALCULO TOTAL ---
+def calcular_total(batata, membrillo):
+    total = 0
+    for cantidad in [batata, membrillo]:
+        if cantidad == 0.5:
+            total += precio_media
+        elif cantidad == 0.25:
+            total += precio_media / 2
+        elif cantidad == 0.75:
+            total += precio_media + (precio_media / 2)
+        elif cantidad >= 1:
+            total += int(cantidad) * precio_docena
+            if cantidad % 1 == 0.5:
+                total += precio_media
+            elif cantidad % 1 == 0.25:
+                total += precio_media / 2
+            elif cantidad % 1 == 0.75:
+                total += precio_media + (precio_media / 2)
+    return total
+
 # --- AGREGAR NUEVA VENTA ---
 st.subheader("📝 Agregar cliente")
 with st.form("form_venta"):
     nombre = st.text_input("Nombre del cliente")
-    batata = st.number_input("Docenas de batata", min_value=0.0, step=0.5)
-    membrillo = st.number_input("Docenas de membrillo", min_value=0.0, step=0.5)
+    batata = st.number_input("Docenas de batata", min_value=0.0, step=0.25)
+    membrillo = st.number_input("Docenas de membrillo", min_value=0.0, step=0.25)
     submitted = st.form_submit_button("Agregar")
 
     if submitted and nombre:
-        total = 0
-        for cantidad in [batata, membrillo]:
-            if cantidad == 0.5:
-                total += precio_media
-            elif cantidad >= 1:
-                total += int(cantidad) * precio_docena
-                if cantidad % 1 == 0.5:
-                    total += precio_media
-
+        total = calcular_total(batata, membrillo)
         nueva_venta = pd.DataFrame([{"Cliente": nombre, "Batata": batata, "Membrillo": membrillo, "Total ($)": total}])
         df = pd.concat([df, nueva_venta], ignore_index=True)
         df.to_excel(data_file, index=False)
@@ -56,17 +68,10 @@ if not df.empty:
 
     if accion == "Modificar":
         idx = df[df["Cliente"] == cliente_seleccionado].index[0]
-        nuevo_batata = st.number_input("Nueva cantidad batata", value=float(df.at[idx, "Batata"]), step=0.5)
-        nuevo_membrillo = st.number_input("Nueva cantidad membrillo", value=float(df.at[idx, "Membrillo"]), step=0.5)
+        nuevo_batata = st.number_input("Nueva cantidad batata", value=float(df.at[idx, "Batata"]), step=0.25)
+        nuevo_membrillo = st.number_input("Nueva cantidad membrillo", value=float(df.at[idx, "Membrillo"]), step=0.25)
         if st.button("Guardar cambios"):
-            total = 0
-            for cantidad in [nuevo_batata, nuevo_membrillo]:
-                if cantidad == 0.5:
-                    total += precio_media
-                elif cantidad >= 1:
-                    total += int(cantidad) * precio_docena
-                    if cantidad % 1 == 0.5:
-                        total += precio_media
+            total = calcular_total(nuevo_batata, nuevo_membrillo)
             df.at[idx, "Batata"] = nuevo_batata
             df.at[idx, "Membrillo"] = nuevo_membrillo
             df.at[idx, "Total ($)"] = total
