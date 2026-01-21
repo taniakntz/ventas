@@ -9,8 +9,8 @@ st.title("📦 Registro de ventas de pastelitos")
 
 # --- CONFIGURACIÓN DE PRECIOS ---
 st.sidebar.header("💲 Precios")
-precio_docena = st.sidebar.number_input("Precio por docena", value=6000, step=500)
-precio_media = st.sidebar.number_input("Precio por media docena", value=3500, step=250)
+precio_docena = st.sidebar.number_input("Precio por docena", value=7000, step=500)
+precio_media = st.sidebar.number_input("Precio por media docena", value=4000, step=250)
 
 # --- ARCHIVO DE GUARDADO ---
 data_file = "ventas_guardadas.xlsx"
@@ -125,3 +125,4 @@ if not df.empty:
         st.success("Todas las ventas fueron eliminadas.")
 else:
     st.info("Todavía no se ingresaron ventas.")
+
