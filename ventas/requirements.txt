@@ -1,7 +1,7 @@
-streamlit
-pandas
-supabase
-requests
-folium
-streamlit-folium
-openpyxl
+streamlit==1.32.0
+pandas==2.2.1
+supabase==2.3.4
+requests==2.31.0
+folium==0.16.0
+streamlit-folium==0.21.0
+openpyxl==3.1.2
