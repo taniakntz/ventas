@@ -253,11 +253,21 @@ with tab3:
 
 # --- PESTAÑA 4: CONFIGURACIÓN ---
 with tab4:
-    st.header("⚙️ Configuración")
-    with st.form("c_form"):
-        n = st.text_input("Nombre Campaña")
-        p_d = st.number_input("Precio Docena", value=7000)
-        p_m = st.number_input("Precio Media", value=4000)
-        if st.form_submit_button("Crear"):
-            supabase.table("campanas").insert({"nombre_campana":n, "precio_docena":p_d, "precio_media":p_m, "estado":"Activa"}).execute()
+    st.header("⚙️ Gestión de Campañas")
+    with st.form("form_campana", clear_on_submit=True):
+        st.subheader("Crear Nueva Campaña")
+        n_nombre = st.text_input("Nombre (Ej: Julio 2026)")
+        n_fecha = st.date_input("Fecha del Evento")
+        n_p_doc = st.number_input("Precio Docena Inicial", value=7000)
+        n_p_med = st.number_input("Precio Media Inicial", value=4000)
+        
+        if st.form_submit_button("Crear Campaña") and n_nombre:
+            supabase.table("campanas").insert({
+                "nombre_campana": n_nombre,
+                "fecha_entrega": str(n_fecha),
+                "precio_docena": n_p_doc,
+                "precio_media": n_p_med,
+                "estado": "Activa"
+            }).execute()
+            st.success("Campaña creada.")
             st.rerun()
