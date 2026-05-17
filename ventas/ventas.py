@@ -25,7 +25,6 @@ def check_password():
     def password_entered():
         if st.session_state["username"] in st.secrets["passwords"] and st.session_state["password"] == st.secrets["passwords"][st.session_state["username"]]:
             st.session_state["password_correct"] = True
-            # Variable permanente para evitar KeyError post-renderizado
             st.session_state["usuario_logeado"] = st.session_state["username"] 
             del st.session_state["password"] 
         else:
@@ -214,14 +213,17 @@ with tab1:
             st.success(f"Pedido guardado. Total calculado: ${total_dinero}")
             st.rerun()
 
-    # Vista de Base de Datos y CRUD
     st.divider()
     pedidos_req = supabase.table("pedidos").select("*").eq("campana_id", ID_CAMPANA).execute()
     if pedidos_req.data:
         df_pedidos = pd.DataFrame(pedidos_req.data)
         
-        # --- MÓDULO DE PRODUCCIÓN (TOTALES GLOBALES) ---
+        # --- MÓDULO DE PRODUCCIÓN ---
         st.subheader("🧑‍🍳 Resumen de Producción")
+        # Conversión segura previa a suma matemática
+        df_pedidos["docenas_batata"] = pd.to_numeric(df_pedidos["docenas_batata"], errors="coerce").fillna(0)
+        df_pedidos["docenas_membrillo"] = pd.to_numeric(df_pedidos["docenas_membrillo"], errors="coerce").fillna(0)
+        
         total_batata = df_pedidos["docenas_batata"].sum()
         total_membrillo = df_pedidos["docenas_membrillo"].sum()
         gran_total = total_batata + total_membrillo
@@ -238,7 +240,10 @@ with tab1:
         columnas_base = ["id", "cliente_nombre", "docenas_batata", "docenas_membrillo", "estado_pago", "modalidad_entrega", "total_calculado"]
         df_pedidos_edicion = df_pedidos[columnas_base].copy()
         
-        st.caption("💡 Para editar: modifica las celdas (cantidades en decimal). Para eliminar un pedido: selecciona la fila izquierda y presiona 'Delete/Supr'.")
+        # Casting estricto para st.data_editor
+        df_pedidos_edicion["total_calculado"] = pd.to_numeric(df_pedidos_edicion["total_calculado"], errors="coerce").fillna(0)
+        
+        st.caption("💡 Para editar: modifica las celdas numéricas. Para eliminar un pedido: selecciona la fila izquierda y presiona 'Delete/Supr'.")
         
         editor_pedidos = st.data_editor(
             df_pedidos_edicion,
@@ -259,7 +264,6 @@ with tab1:
         if st.button("💾 Guardar Cambios en Pedidos"):
             estado_pedidos = st.session_state["editor_pedidos_tabla"]
             try:
-                # Actualización de datos modificados
                 if estado_pedidos["edited_rows"]:
                     for idx_str, cambios in estado_pedidos["edited_rows"].items():
                         idx = int(idx_str)
@@ -271,13 +275,11 @@ with tab1:
                         nueva_batata = float(cambios.get("docenas_batata", batata_actual))
                         nuevo_membrillo = float(cambios.get("docenas_membrillo", membrillo_actual))
                         
-                        # Recálculo si hay alteración en cantidades
                         if "docenas_batata" in cambios or "docenas_membrillo" in cambios:
                             cambios["total_calculado"] = float(calcular_total(nueva_batata, nuevo_membrillo, PRECIO_DOCENA, PRECIO_MEDIA))
                         
                         supabase.table("pedidos").update(cambios).eq("id", pedido_id).execute()
 
-                # Ejecución de eliminación (DELETE)
                 if estado_pedidos["deleted_rows"]:
                     for idx in estado_pedidos["deleted_rows"]:
                         pedido_id = df_pedidos_edicion.iloc[idx]["id"]
@@ -297,15 +299,15 @@ with tab1:
         excel_data = exportar_excel(df_excel[["cliente_nombre", "Batata", "Membrillo", "total_calculado", "estado_pago", "modalidad_entrega"]])
         st.download_button("📥 Descargar Planilla Excel (Formato A4)", data=excel_data, file_name=f"pedidos_{campana_activa}.xlsx")
 
-        # --- ZONA DE PELIGRO: PURGA DE DATOS ---
+        # --- ZONA DE PELIGRO ---
         st.divider()
-        with st.expander("⚠️ Zona de Peligro: Eliminar todos los pedidos"):
-            st.error("Alerta: Esta instrucción ejecutará un DELETE masivo sin condicionales de estado. Perderás todo el registro financiero asociado a estos pedidos.")
+        with st.expander("⚠️ Zona de Peligro: Eliminar todos los pedidos de la campaña"):
+            st.error("Alerta: Esta instrucción ejecutará un DELETE masivo sobre los pedidos vinculados a esta campaña específica.")
             confirmacion = st.checkbox("Comprendo el riesgo. Desbloquear botón de purga.")
             if confirmacion:
-                if st.button("🚨 Eliminar Todos los Pedidos de esta Campaña", type="primary"):
+                if st.button("🚨 Ejecutar Borrado", type="primary"):
                     supabase.table("pedidos").delete().eq("campana_id", ID_CAMPANA).execute()
-                    st.success("Comando ejecutado. Los registros fueron eliminados permanentemente.")
+                    st.success("Registros eliminados permanentemente.")
                     st.rerun()
     else:
         st.info("No hay pedidos registrados en esta campaña.")
@@ -318,6 +320,7 @@ with tab2:
         ingresos_totales = 0
     else:
         df_ped = pd.DataFrame(pedidos_req.data)
+        df_ped['total_calculado'] = pd.to_numeric(df_ped['total_calculado'], errors="coerce").fillna(0)
         ingresos_totales = df_ped[df_ped['estado_pago'] == 'Pagado']['total_calculado'].sum()
 
     gastos_req = supabase.table("gastos").select("*").eq("campana_id", ID_CAMPANA).execute()
@@ -325,6 +328,7 @@ with tab2:
     gastos_totales = 0
     if gastos_req.data:
         df_gastos = pd.DataFrame(gastos_req.data)
+        df_gastos['monto'] = pd.to_numeric(df_gastos['monto'], errors="coerce").fillna(0)
         gastos_totales = df_gastos['monto'].sum()
     
     rentabilidad = ingresos_totales - gastos_totales
@@ -354,9 +358,13 @@ with tab2:
 
     st.subheader("📋 Historial y Edición de Gastos")
     if not df_gastos.empty:
-        st.caption("💡 Puedes editar las celdas directamente o seleccionar una fila y presionar 'Delete' para eliminarla.")
+        st.caption("💡 Puedes editar las celdas numéricas/fechas directamente o seleccionar una fila y presionar 'Delete' para eliminarla.")
         
         df_gastos_edicion = df_gastos[["id", "descripcion", "monto", "fecha_registro"]].copy()
+        
+        # Casting estricto de tipos para prevenir el TypeCompatibility error de Streamlit
+        df_gastos_edicion["monto"] = pd.to_numeric(df_gastos_edicion["monto"], errors="coerce")
+        df_gastos_edicion["fecha_registro"] = pd.to_datetime(df_gastos_edicion["fecha_registro"], errors="coerce").dt.date
         
         gastos_editados = st.data_editor(
             df_gastos_edicion,
@@ -415,7 +423,7 @@ with tab3:
                     st.warning("Se necesitan al menos 2 puntos para generar una ruta.")
                 else:
                     with st.spinner("Calculando ruta óptima con OpenRouteService..."):
-                        coordenadas = [[row['longitud'], row['latitud']] for _, row in pedidos_confirmados.iterrows()]
+                        coordenadas = [[float(row['longitud']), float(row['latitud'])] for _, row in pedidos_confirmados.iterrows()]
                         origen = [-55.108986,-27.476643] 
                         jobs = [{"id": i, "location": coord} for i, coord in enumerate(coordenadas)]
                         
