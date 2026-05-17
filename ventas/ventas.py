@@ -79,7 +79,7 @@ def calcular_total(batata, membrillo, precio_doc, precio_med):
         elif cantidad == 0.75: total += precio_med + (precio_med / 2)
         elif cantidad >= 1:
             total += int(cantidad) * precio_doc
-            resto = cantidad % 1
+            resto = quantity % 1 if 'quantity' in locals() else cantidad % 1
             if resto == 0.5: total += precio_med
             elif resto == 0.25: total += precio_med / 2
             elif resto == 0.75: total += precio_med + (precio_med / 2)
@@ -177,13 +177,11 @@ tab1, tab2, tab3, tab4 = st.tabs(["📦 Pedidos", "📈 Finanzas", "🚚 Reparto
 with tab1:
     st.header("📝 Ingreso de Nuevo Pedido")
     
-    # Función para limpiar los campos solo cuando el guardado es exitoso
     def limpiar_formulario():
         for key in ["in_cliente", "in_bat", "in_mem", "in_mod", "in_dir", "in_ran", "in_met", "in_est"]:
             if key in st.session_state:
                 del st.session_state[key]
 
-    # Campos dinámicos y reactivos (sin st.form)
     cliente = st.text_input("Nombre del Cliente", key="in_cliente")
     
     col1, col2 = st.columns(2)
@@ -194,7 +192,6 @@ with tab1:
     with col_m:
         modalidad = st.selectbox("Modalidad de Entrega", ["Retiro_Local", "Envio_Domicilio"], key="in_mod")
         
-        # Renderizado Condicional en Tiempo Real
         if modalidad == "Envio_Domicilio":
             direccion = st.text_input("Dirección (Solo si es Envío)", placeholder="Calle 123, Ciudad", key="in_dir")
             rango = st.selectbox("Rango Horario", ["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"], key="in_ran")
@@ -206,7 +203,6 @@ with tab1:
         metodo = st.selectbox("Método de Pago", ["Efectivo", "Transferencia", "N/A"], key="in_met")
         estado_pago = st.selectbox("Estado de Pago", ["Pendiente", "Pagado"], key="in_est")
 
-    # Botón de guardado independiente
     if st.button("Guardar Pedido", type="primary"):
         if not cliente.strip():
             st.error("⚠️ El nombre del cliente es obligatorio.")
@@ -236,14 +232,12 @@ with tab1:
             supabase.table("pedidos").insert(nuevo_pedido).execute()
             st.success(f"Pedido guardado. Total calculado: ${total_dinero}")
             
-            # Limpiamos la pantalla automáticamente tras el éxito
             limpiar_formulario()
             st.rerun()
 
     st.divider()
     pedidos_req = supabase.table("pedidos").select("*").eq("campana_id", ID_CAMPANA).execute()
     
-    # ... (El resto del código de la tabla de base de datos se mantiene igual a partir de aquí)
     if pedidos_req.data:
         df_pedidos = pd.DataFrame(pedidos_req.data)
         
@@ -266,7 +260,6 @@ with tab1:
         # --- VISTA DETALLADA POR CLIENTE Y EDICIÓN ---
         st.subheader("📋 Gestión de Pedidos")
         
-        # Agregamos las columnas logísticas a la vista de edición
         columnas_base = ["id", "cliente_nombre", "docenas_batata", "docenas_membrillo", "estado_pago", "modalidad_entrega", "direccion_envio", "rango_horario", "total_calculado"]
         df_pedidos_edicion = df_pedidos[columnas_base].copy()
         df_pedidos_edicion["total_calculado"] = pd.to_numeric(df_pedidos_edicion["total_calculado"], errors="coerce").fillna(0)
@@ -299,7 +292,7 @@ with tab1:
                         idx = int(idx_str)
                         pedido_id = df_pedidos_edicion.iloc[idx]["id"]
                         
-                        # Variables financieras
+                        # --- REGLAS FINANCIERAS ---
                         batata_actual = float(df_pedidos_edicion.iloc[idx]["docenas_batata"])
                         membrillo_actual = float(df_pedidos_edicion.iloc[idx]["docenas_membrillo"])
                         nueva_batata = float(cambios.get("docenas_batata", batata_actual))
@@ -308,21 +301,28 @@ with tab1:
                         if "docenas_batata" in cambios or "docenas_membrillo" in cambios:
                             cambios["total_calculado"] = float(calcular_total(nueva_batata, nuevo_membrillo, PRECIO_DOCENA, PRECIO_MEDIA))
                         
-                        # Variables logísticas
+                        # --- REGLAS LOGÍSTICAS DE SANITIZACIÓN ESTRICTA ---
                         mod_actual = df_pedidos_edicion.iloc[idx]["modalidad_entrega"]
-                        dir_actual = df_pedidos_edicion.iloc[idx]["direccion_envio"]
                         nueva_mod = cambios.get("modalidad_entrega", mod_actual)
-                        nueva_dir = cambios.get("direccion_envio", dir_actual)
 
-                        # Auto-Geocodificación si pasamos a envío a domicilio o cambiamos la calle
-                        if nueva_mod == "Envio_Domicilio" and ("modalidad_entrega" in cambios or "direccion_envio" in cambios):
-                            if pd.notna(nueva_dir) and str(nueva_dir).strip() and str(nueva_dir).strip() != "None":
-                                lat, lon = obtener_coordenadas(nueva_dir)
-                                cambios["latitud"] = lat
-                                cambios["longitud"] = lon
-                            else:
-                                cambios["latitud"] = None
-                                cambios["longitud"] = None
+                        if nueva_mod == "Retiro_Local":
+                            # Forzar eliminación de datos de envío si se cambia la modalidad a retiro
+                            cambios["direccion_envio"] = None
+                            cambios["rango_horario"] = None
+                            cambios["latitud"] = None
+                            cambios["longitud"] = None
+                        else:
+                            dir_actual = df_pedidos_edicion.iloc[idx]["direccion_envio"]
+                            nueva_dir = cambios.get("direccion_envio", dir_actual)
+                            
+                            if "modalidad_entrega" in cambios or "direccion_envio" in cambios:
+                                if pd.notna(nueva_dir) and str(nueva_dir).strip() and str(nueva_dir).strip() != "None":
+                                    lat, lon = obtener_coordenadas(nueva_dir)
+                                    cambios["latitud"] = lat
+                                    cambios["longitud"] = lon
+                                else:
+                                    cambios["latitud"] = None
+                                    cambios["longitud"] = None
                         
                         supabase.table("pedidos").update(cambios).eq("id", pedido_id).execute()
 
@@ -451,21 +451,16 @@ with tab3:
     st.header("🚚 Logística y Envíos")
     if pedidos_req.data:
         df_rutas = pd.DataFrame(pedidos_req.data)
-        # Filtramos todos los envíos a domicilio, tengan o no coordenadas
         envios_totales = df_rutas[df_rutas['modalidad_entrega'] == 'Envio_Domicilio']
         
         if not envios_totales.empty:
-            
-            # Sistema de Alerta: Detectar pedidos pasados a envío pero que carecen de dirección
             sin_coord = envios_totales[envios_totales['latitud'].isnull()]
             if not sin_coord.empty:
                 st.warning(f"⚠️ Atención: Hay {len(sin_coord)} pedido(s) asignados como 'Envío a Domicilio' que no tienen una dirección o coordenadas válidas. Debes completar su dirección en la Pestaña de Pedidos para que aparezcan en la ruta.")
             
-            # Solo pasamos al mapa los que sí tienen coordenadas
             envios = envios_totales[envios_totales['latitud'].notnull()]
             
             if not envios.empty:
-                # Implementación del Filtro "Todos"
                 opciones_rango = ["Todos"] + list(envios['rango_horario'].dropna().unique())
                 rango_seleccionado = st.selectbox("Filtrar por Rango Horario", opciones_rango)
                 
@@ -477,7 +472,6 @@ with tab3:
                 st.subheader("Borrador de Ruta")
                 pedidos_rango["Incluir"] = True
                 
-                # Mostramos también el rango en la tablita para que sepas de cuándo es cada uno si eliges "Todos"
                 editado = st.data_editor(pedidos_rango[["cliente_nombre", "direccion_envio", "rango_horario", "Incluir"]], hide_index=True)
                 
                 if st.button("🗺️ Generar Ruta Óptima (VRP)"):
