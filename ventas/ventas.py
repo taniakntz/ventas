@@ -101,7 +101,6 @@ def exportar_excel(dataframe):
             adjusted_width = (max_length + 2)
             worksheet.column_dimensions[column].width = adjusted_width
 
-        # Asumiendo que Total Calculado está en una columna específica (buscar su índice real si varía)
     return output.getvalue()
 
 # --- 5. INTERFAZ PRINCIPAL ---
@@ -114,10 +113,33 @@ if st.sidebar.button("Cerrar Sesión"):
 response_camp = supabase.table("campanas").select("*").execute()
 campanas_df = pd.DataFrame(response_camp.data)
 
+# --- BLOQUE DE EMERGENCIA: SI NO HAY CAMPAÑAS ---
 if campanas_df.empty:
-    st.warning("⚠️ No hay campañas configuradas. Crea una en la pestaña Configuración.")
-    st.stop()
+    tab1, tab2, tab3, tab4 = st.tabs(["📦 Pedidos", "📈 Finanzas", "🚚 Reparto", "⚙️ Configuración"])
+    with tab1:
+        st.warning("⚠️ Sistema bloqueado. Ve a la pestaña Configuración y crea tu primera campaña para comenzar.")
+    with tab4:
+        st.header("⚙️ Primera Configuración")
+        with st.form("form_campana_inicial", clear_on_submit=True):
+            st.subheader("Crear Tu Primera Campaña")
+            n_nombre = st.text_input("Nombre (Ej: Mayo 2026)")
+            n_fecha = st.date_input("Fecha del Evento")
+            n_p_doc = st.number_input("Precio Docena Inicial", value=7000)
+            n_p_med = st.number_input("Precio Media Inicial", value=4000)
+            
+            if st.form_submit_button("Crear Campaña") and n_nombre:
+                supabase.table("campanas").insert({
+                    "nombre_campana": n_nombre,
+                    "fecha_entrega": str(n_fecha),
+                    "precio_docena": n_p_doc,
+                    "precio_media": n_p_med,
+                    "estado": "Activa"
+                }).execute()
+                st.success("Campaña creada. Recargando el sistema...")
+                st.rerun()
+    st.stop() # Frena la ejecución aquí hasta que exista una campaña
 
+# --- EJECUCIÓN NORMAL: SI HAY CAMPAÑAS ---
 campana_activa = st.sidebar.selectbox("Seleccionar Campaña Activa", campanas_df['nombre_campana'].tolist())
 datos_campana = campanas_df[campanas_df['nombre_campana'] == campana_activa].iloc[0]
 ID_CAMPANA = datos_campana['id']
@@ -249,7 +271,7 @@ with tab3:
                 else:
                     with st.spinner("Calculando ruta óptima con OpenRouteService..."):
                         coordenadas = [[row['longitud'], row['latitud']] for _, row in pedidos_confirmados.iterrows()]
-                        #Punto de partida
+                        # Punto de partida
                         origen = [-55.108986,-27.476643] 
                         jobs = [{"id": i, "location": coord} for i, coord in enumerate(coordenadas)]
                         
