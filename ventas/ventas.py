@@ -213,26 +213,33 @@ with tab2:
                     supabase.table("gastos").delete().eq("id", df_gastos.iloc[i]["id"]).execute()
                 st.rerun()
 
-# --- PESTAÑA 3: REPARTO (LOGÍSTICA) ---
+# --- PESTAÑA 3: REPARTO ---
 with tab3:
     st.header("🚚 Logística")
     if pedidos_req.data:
         envios = df[df['modalidad_entrega'] == "Envio_Domicilio"].copy()
         if not envios.empty:
-            # FILTRO "TODOS"
-            opciones = ["Todos"] + sorted(list(envios['rango_horario'].dropna().unique()))
-            filt = st.selectbox("Filtrar Horario", opciones)
+            filt = st.selectbox("Filtro", ["Todos"] + list(envios['rango_horario'].dropna().unique()))
             df_log = envios if filt == "Todos" else envios[envios['rango_horario'] == filt]
-
-            st.subheader("📍 Direcciones y Horarios")
-            # Acá es donde completás los datos si cambiaste de Retiro a Envío
-            res_log = st.data_editor(df_log[["id", "cliente_nombre", "direccion_envio", "rango_horario"]], 
-                                     column_config={"id":None, "cliente_nombre":st.column_config.TextColumn(disabled=True),
-                                                    "rango_horario":st.column_config.SelectboxColumn("Horario", options=["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"])},
-                                     hide_index=True, key="l_v_final")
             
-            if st.button("📍 Actualizar Datos de Envío"):
-                st_l = st.session_state["l_v_final"]
+            # Agregamos la columna 'Incluir' para el ruteo
+            df_log["Incluir"] = True
+            
+            st.subheader("📍 Datos de Envío")
+            # El editor ahora incluye 'Incluir' para seleccionar qué graficar
+            res_log = st.data_editor(df_log[["id", "cliente_nombre", "direccion_envio", "rango_horario", "Incluir"]], 
+                                     column_config={
+                                         "id":None, 
+                                         "cliente_nombre":st.column_config.TextColumn(disabled=True),
+                                         "Incluir": st.column_config.CheckboxColumn("Incluir", default=True),
+                                         "rango_horario":st.column_config.SelectboxColumn("Horario", options=["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"])
+                                     },
+                                     hide_index=True, key="log_vfinal")
+            
+            col_l1, col_l2 = st.columns(2)
+            
+            if col_l1.button("📍 Actualizar Logística"):
+                st_l = st.session_state["log_vfinal"]
                 for i_s, m in st_l["edited_rows"].items():
                     rid = df_log.iloc[int(i_s)]["id"]
                     if "direccion_envio" in m:
@@ -241,16 +248,24 @@ with tab3:
                     supabase.table("pedidos").update(m).eq("id", rid).execute()
                 st.rerun()
 
-            if st.button("🗺️ Ver Mapa"):
-                ready = df_log[df_log['latitud'].notnull()]
-                if not ready.empty:
+            if col_l2.button("🗺️ Ver Mapa"):
+                # Filtramos por los que el usuario dejó marcados como 'Incluir' en el editor
+                ready = res_log[(res_log['Incluir'] == True)]
+                
+                # Buscamos las coordenadas originales de los seleccionados
+                ready_ids = ready['id'].tolist()
+                ready_coords = df_log[(df_log['id'].isin(ready_ids)) & (df_log['latitud'].notnull())]
+                
+                if not ready_coords.empty:
                     m = folium.Map(location=[-27.4766, -55.1089], zoom_start=13)
-                    for _, r in ready.iterrows():
+                    for _, r in ready_coords.iterrows():
                         folium.Marker([r['latitud'], r['longitud']], popup=r['cliente_nombre']).add_to(m)
                     st_folium(m, width=700)
+                else:
+                    st.warning("No hay pedidos seleccionados con coordenadas válidas.")
         else:
             st.info("No hay pedidos con envío a domicilio.")
-
+            
 # --- PESTAÑA 4: CONFIGURACIÓN ---
 with tab4:
     st.header("⚙️ Gestión de Campañas")
