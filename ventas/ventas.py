@@ -176,57 +176,74 @@ tab1, tab2, tab3, tab4 = st.tabs(["📦 Pedidos", "📈 Finanzas", "🚚 Reparto
 # --- PESTAÑA 1: PEDIDOS ---
 with tab1:
     st.header("📝 Ingreso de Nuevo Pedido")
-    with st.form("form_pedido", clear_on_submit=True):
-        cliente = st.text_input("Nombre del Cliente")
-        
-        col1, col2 = st.columns(2)
-        with col1: cant_bat = st.number_input("Batata (Docenas)", min_value=0.0, step=0.25, format="%.2f")
-        with col2: cant_mem = st.number_input("Membrillo (Docenas)", min_value=0.0, step=0.25, format="%.2f")
-        
-        col_m, col_p = st.columns(2)
-        with col_m:
-            modalidad = st.selectbox("Modalidad de Entrega", ["Retiro_Local", "Envio_Domicilio"])
-            direccion = st.text_input("Dirección (Solo si es Envío)", placeholder="Calle 123, Ciudad") if modalidad == "Envio_Domicilio" else ""
-            rango = st.selectbox("Rango Horario", ["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"]) if modalidad == "Envio_Domicilio" else ""
-        with col_p:
-            metodo = st.selectbox("Método de Pago", ["Efectivo", "Transferencia", "N/A"])
-            estado_pago = st.selectbox("Estado de Pago", ["Pendiente", "Pagado"])
+    
+    # Función para limpiar los campos solo cuando el guardado es exitoso
+    def limpiar_formulario():
+        for key in ["in_cliente", "in_bat", "in_mem", "in_mod", "in_dir", "in_ran", "in_met", "in_est"]:
+            if key in st.session_state:
+                del st.session_state[key]
 
-        submit = st.form_submit_button("Guardar Pedido")
+    # Campos dinámicos y reactivos (sin st.form)
+    cliente = st.text_input("Nombre del Cliente", key="in_cliente")
+    
+    col1, col2 = st.columns(2)
+    with col1: cant_bat = st.number_input("Batata (Docenas)", min_value=0.0, step=0.25, format="%.2f", key="in_bat")
+    with col2: cant_mem = st.number_input("Membrillo (Docenas)", min_value=0.0, step=0.25, format="%.2f", key="in_mem")
+    
+    col_m, col_p = st.columns(2)
+    with col_m:
+        modalidad = st.selectbox("Modalidad de Entrega", ["Retiro_Local", "Envio_Domicilio"], key="in_mod")
         
-        # --- SUBMIT CON VALIDACIÓN ESTRICTA DE CONTROL ---
-        if submit:
-            if not cliente.strip():
-                st.error("⚠️ El nombre del cliente es obligatorio.")
-            elif modalidad == "Envio_Domicilio" and not direccion.strip():
-                st.error("⚠️ Error de validación: Para envíos a domicilio, los campos de dirección y rango horario son obligatorios.")
-            else:
-                total_dinero = calcular_total(cant_bat, cant_mem, PRECIO_DOCENA, PRECIO_MEDIA)
-                lat, lon = obtener_coordenadas(direccion) if modalidad == "Envio_Domicilio" and direccion else (None, None)
-                
-                if modalidad == "Envio_Domicilio" and (lat is None or lon is None):
-                    st.warning("⚠️ Advertencia: No se pudieron validar las coordenadas geográficas de la dirección. El pedido se guardará, pero podría no graficarse en el mapa.")
-                
-                nuevo_pedido = {
-                    "campana_id": ID_CAMPANA,
-                    "cliente_nombre": cliente,
-                    "docenas_batata": float(cant_bat),
-                    "docenas_membrillo": float(cant_mem),
-                    "total_calculado": float(total_dinero),
-                    "estado_pago": estado_pago,
-                    "metodo_pago": metodo,
-                    "modalidad_entrega": modalidad,
-                    "direccion_envio": direccion if modalidad == "Envio_Domicilio" else None,
-                    "rango_horario": rango if modalidad == "Envio_Domicilio" else None,
-                    "latitud": lat,
-                    "longitud": lon
-                }
-                supabase.table("pedidos").insert(nuevo_pedido).execute()
-                st.success(f"Pedido guardado. Total calculado: ${total_dinero}")
-                st.rerun()
+        # Renderizado Condicional en Tiempo Real
+        if modalidad == "Envio_Domicilio":
+            direccion = st.text_input("Dirección (Solo si es Envío)", placeholder="Calle 123, Ciudad", key="in_dir")
+            rango = st.selectbox("Rango Horario", ["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"], key="in_ran")
+        else:
+            direccion = None
+            rango = None
+            
+    with col_p:
+        metodo = st.selectbox("Método de Pago", ["Efectivo", "Transferencia", "N/A"], key="in_met")
+        estado_pago = st.selectbox("Estado de Pago", ["Pendiente", "Pagado"], key="in_est")
+
+    # Botón de guardado independiente
+    if st.button("Guardar Pedido", type="primary"):
+        if not cliente.strip():
+            st.error("⚠️ El nombre del cliente es obligatorio.")
+        elif modalidad == "Envio_Domicilio" and not direccion.strip():
+            st.error("⚠️ Error de validación: Para envíos a domicilio, la dirección es obligatoria.")
+        else:
+            total_dinero = calcular_total(cant_bat, cant_mem, PRECIO_DOCENA, PRECIO_MEDIA)
+            lat, lon = obtener_coordenadas(direccion) if modalidad == "Envio_Domicilio" and direccion else (None, None)
+            
+            if modalidad == "Envio_Domicilio" and (lat is None or lon is None):
+                st.warning("⚠️ Advertencia: No se pudieron validar las coordenadas. El pedido se guardará, pero podría no graficarse en el mapa.")
+            
+            nuevo_pedido = {
+                "campana_id": ID_CAMPANA,
+                "cliente_nombre": cliente,
+                "docenas_batata": float(cant_bat),
+                "docenas_membrillo": float(cant_mem),
+                "total_calculado": float(total_dinero),
+                "estado_pago": estado_pago,
+                "metodo_pago": metodo,
+                "modalidad_entrega": modalidad,
+                "direccion_envio": direccion,
+                "rango_horario": rango,
+                "latitud": lat,
+                "longitud": lon
+            }
+            supabase.table("pedidos").insert(nuevo_pedido).execute()
+            st.success(f"Pedido guardado. Total calculado: ${total_dinero}")
+            
+            # Limpiamos la pantalla automáticamente tras el éxito
+            limpiar_formulario()
+            st.rerun()
 
     st.divider()
     pedidos_req = supabase.table("pedidos").select("*").eq("campana_id", ID_CAMPANA).execute()
+    
+    # ... (El resto del código de la tabla de base de datos se mantiene igual a partir de aquí)
     if pedidos_req.data:
         df_pedidos = pd.DataFrame(pedidos_req.data)
         
