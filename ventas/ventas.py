@@ -51,7 +51,7 @@ if not check_password():
 def decimal_a_fraccion(valor):
     if pd.isna(valor) or valor == 0: return "0"
     entero, decimal = int(valor), valor - int(valor)
-    frac = {0.25: "1/4", 0.5: "1/2", 0.75: "3/4"}.get(decimal, "")
+    frac = {0.25: "1/4", 0.5: "1/2", 0.75: "3/4"}.get(round(decimal, 2), "")
     if entero == 0: return frac if frac else str(valor)
     return f"{entero} {frac}" if frac else str(entero)
 
@@ -60,7 +60,7 @@ def calcular_total(batata, membrillo, precio_doc, precio_med):
     if total_docenas == 1.0 or (batata == 0.5 and membrillo == 0.5): return precio_doc
     total = 0
     for cant in [batata, membrillo]:
-        entero, resto = int(cant), cant % 1
+        entero, resto = int(cant), round(cant % 1, 2)
         total += entero * precio_doc
         total += {0.25: precio_med/2, 0.5: precio_med, 0.75: precio_med*1.5}.get(resto, 0)
     return total
@@ -98,24 +98,42 @@ tab1, tab2, tab3, tab4 = st.tabs(["📦 Pedidos", "📈 Finanzas", "🚚 Reparto
 # --- PESTAÑA 1: PEDIDOS ---
 with tab1:
     st.header("📝 Nuevo Pedido")
-    with st.container():
-        c_nom = st.text_input("Cliente", key="n_cli")
-        col1, col2 = st.columns(2)
-        c_bat = col1.number_input("Batata", 0.0, step=0.25, key="n_bat")
-        c_mem = col2.number_input("Membrillo", 0.0, step=0.25, key="n_mem")
-        col3, col4 = st.columns(2)
-        c_mod = col3.selectbox("Entrega", ["Retiro_Local", "Envio_Domicilio"], key="n_mod")
-        c_pag = col4.selectbox("Pago", ["Pendiente", "Pagado"], key="n_pag")
-        
-        if st.button("Guardar", type="primary"):
-            if c_nom:
-                total = calcular_total(c_bat, c_mem, PRECIO_DOCENA, PRECIO_MEDIA)
-                supabase.table("pedidos").insert({
-                    "campana_id": ID_CAMPANA, "cliente_nombre": c_nom, "docenas_batata": c_bat,
-                    "docenas_membrillo": c_mem, "total_calculado": total, "estado_pago": c_pag,
-                    "modalidad_entrega": c_mod
-                }).execute()
-                st.rerun()
+    
+    # Widgets sueltos (sin st.form) para que la pantalla reaccione al instante
+    c_nom = st.text_input("Nombre del Cliente", key="in_nom")
+    col1, col2 = st.columns(2)
+    with col1: c_bat = st.number_input("Docenas Batata", 0.0, step=0.25, key="in_bat")
+    with col2: c_mem = st.number_input("Docenas Membrillo", 0.0, step=0.25, key="in_mem")
+    
+    col3, col4 = st.columns(2)
+    with col3: c_mod = st.selectbox("Modalidad de Entrega", ["Retiro_Local", "Envio_Domicilio"], key="in_mod")
+    with col4: c_pag = st.selectbox("Estado de Pago", ["Pendiente", "Pagado"], key="in_pag")
+    
+    # REACTIVIDAD PURA: Aparece al instante si seleccionás Envío
+    c_dir = None
+    c_ran = None
+    if c_mod == "Envio_Domicilio":
+        c_dir = st.text_input("Dirección de Envío", placeholder="Calle 123, Ciudad", key="in_dir")
+        c_ran = st.selectbox("Rango Horario", ["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"], key="in_ran")
+
+    if st.button("Guardar Pedido", type="primary"):
+        if not c_nom:
+            st.error("⚠️ El nombre del cliente es obligatorio.")
+        elif c_mod == "Envio_Domicilio" and not c_dir:
+            st.error("⚠️ Falta la dirección para el envío.")
+        else:
+            total = calcular_total(c_bat, c_mem, PRECIO_DOCENA, PRECIO_MEDIA)
+            lat, lon = obtener_coordenadas(c_dir) if c_dir else (None, None)
+            
+            supabase.table("pedidos").insert({
+                "campana_id": ID_CAMPANA, "cliente_nombre": c_nom, "docenas_batata": c_bat,
+                "docenas_membrillo": c_mem, "total_calculado": total, "estado_pago": c_pag,
+                "modalidad_entrega": c_mod, "direccion_envio": c_dir, "rango_horario": c_ran,
+                "latitud": lat, "longitud": lon
+            }).execute()
+            
+            st.success(f"Pedido de {c_nom} guardado (${total})")
+            st.rerun()
 
     st.divider()
     pedidos_req = supabase.table("pedidos").select("*").eq("campana_id", ID_CAMPANA).execute()
@@ -126,29 +144,27 @@ with tab1:
         st.subheader("🧑‍🍳 Producción")
         b_t, m_t = df["docenas_batata"].sum(), df["docenas_membrillo"].sum()
         c1, c2, c3 = st.columns(3)
-        c1.metric("Batata", decimal_a_fraccion(b_t))
-        c2.metric("Membrillo", decimal_a_fraccion(m_t))
-        c3.metric("Total", decimal_a_fraccion(b_t + m_t))
+        c1.metric("Total Batata", decimal_a_fraccion(b_t))
+        c2.metric("Total Membrillo", decimal_a_fraccion(m_t))
+        c3.metric("Gran Total", decimal_a_fraccion(b_t + m_t))
 
-        # Editor de Pedidos (SIMPLIFICADO PARA EVITAR ERRORES)
-        st.subheader("📋 Lista de Pedidos")
-        cols_edit = ["id", "cliente_nombre", "docenas_batata", "docenas_membrillo", "estado_pago", "modalidad_entrega", "total_calculado"]
-        df_ed = df[cols_edit].copy()
+        # Editor de Pedidos
+        st.subheader("📋 Gestión de Pedidos")
+        cols_base = ["id", "cliente_nombre", "docenas_batata", "docenas_membrillo", "estado_pago", "modalidad_entrega", "total_calculado"]
+        df_ed = df[cols_base].copy()
         
         res_ed = st.data_editor(df_ed, column_config={
             "id": None, "total_calculado": st.column_config.NumberColumn("Total", disabled=True),
             "modalidad_entrega": st.column_config.SelectboxColumn("Entrega", options=["Retiro_Local", "Envio_Domicilio"])
-        }, num_rows="dynamic", hide_index=True, key="p_v4")
+        }, num_rows="dynamic", hide_index=True, key="pedidos_vfinal")
 
         if st.button("💾 Guardar Cambios"):
-            state = st.session_state["p_v4"]
+            state = st.session_state["pedidos_vfinal"]
             for idx_str, mods in state["edited_rows"].items():
                 idx = int(idx_str)
                 row_id = df_ed.iloc[idx]["id"]
-                # Si cambia a Retiro_Local, borramos basura logística en DB
                 if mods.get("modalidad_entrega") == "Retiro_Local":
                     mods.update({"direccion_envio": None, "rango_horario": None, "latitud": None, "longitud": None})
-                # Recalcular total si cambian cantidades
                 if "docenas_batata" in mods or "docenas_membrillo" in mods:
                     nb = mods.get("docenas_batata", df_ed.iloc[idx]["docenas_batata"])
                     nm = mods.get("docenas_membrillo", df_ed.iloc[idx]["docenas_membrillo"])
@@ -166,28 +182,27 @@ with tab2:
         gas_res = supabase.table("gastos").select("*").eq("campana_id", ID_CAMPANA).execute()
         gas = sum(g['monto'] for g in gas_res.data) if gas_res.data else 0
         c1, c2, c3 = st.columns(3)
-        c1.metric("Ingresos", f"${ing:,.2f}")
+        c1.metric("Ingresos (Pagados)", f"${ing:,.2f}")
         c2.metric("Gastos", f"${gas:,.2f}")
         c3.metric("Neto", f"${ing-gas:,.2f}")
 
-# --- PESTAÑA 3: REPARTO (LOGÍSTICA) ---
+# --- PESTAÑA 3: REPARTO ---
 with tab3:
     st.header("🚚 Logística")
     if pedidos_req.data:
         envios = df[df['modalidad_entrega'] == "Envio_Domicilio"].copy()
         if not envios.empty:
-            filt = st.selectbox("Filtro", ["Todos"] + list(envios['rango_horario'].dropna().unique()))
+            filt = st.selectbox("Filtro Horario", ["Todos"] + list(envios['rango_horario'].dropna().unique()))
             df_log = envios if filt == "Todos" else envios[envios['rango_horario'] == filt]
             
-            st.subheader("📍 Completar Datos de Envío")
-            # AQUÍ ES DONDE EDITAS DIRECCIONES Y HORARIOS
+            st.subheader("📍 Completar Direcciones")
             res_log = st.data_editor(df_log[["id", "cliente_nombre", "direccion_envio", "rango_horario"]], 
                                      column_config={"id":None, "cliente_nombre":st.column_config.TextColumn(disabled=True),
                                                     "rango_horario":st.column_config.SelectboxColumn("Horario", options=["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"])},
-                                     hide_index=True, key="log_v1")
+                                     hide_index=True, key="log_vfinal")
             
-            if st.button("📍 Actualizar Direcciones/Horarios"):
-                state_l = st.session_state["log_v1"]
+            if st.button("📍 Actualizar Datos Logísticos"):
+                state_l = st.session_state["log_vfinal"]
                 for idx_str, mods in state_l["edited_rows"].items():
                     idx = int(idx_str)
                     rid = df_log.iloc[idx]["id"]
@@ -209,9 +224,9 @@ with tab3:
 with tab4:
     st.header("⚙️ Configuración")
     with st.form("new_camp"):
-        n = st.text_input("Nombre")
+        n = st.text_input("Nombre de Campaña")
         p_d = st.number_input("Precio Docena", value=7000)
         p_m = st.number_input("Precio Media", value=4000)
-        if st.form_submit_button("Crear"):
+        if st.form_submit_button("Crear Campaña"):
             supabase.table("campanas").insert({"nombre_campana":n, "precio_docena":p_d, "precio_media":p_m, "estado":"Activa"}).execute()
             st.rerun()
