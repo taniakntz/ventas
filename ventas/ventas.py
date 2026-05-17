@@ -88,10 +88,13 @@ def calcular_total(batata, membrillo, precio_doc, precio_med):
 def obtener_coordenadas(direccion):
     url = f"https://nominatim.openstreetmap.org/search?q={direccion}&format=json&limit=1"
     headers = {'User-Agent': 'PastelitosApp/1.0'}
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200 and len(response.json()) > 0:
-        data = response.json()[0]
-        return float(data['lat']), float(data['lon'])
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200 and len(response.json()) > 0:
+            data = response.json()[0]
+            return float(data['lat']), float(data['lon'])
+    except Exception:
+        pass
     return None, None
 
 def exportar_excel(dataframe):
@@ -191,27 +194,36 @@ with tab1:
 
         submit = st.form_submit_button("Guardar Pedido")
         
-        if submit and cliente:
-            total_dinero = calcular_total(cant_bat, cant_mem, PRECIO_DOCENA, PRECIO_MEDIA)
-            lat, lon = obtener_coordenadas(direccion) if modalidad == "Envio_Domicilio" and direccion else (None, None)
-            
-            nuevo_pedido = {
-                "campana_id": ID_CAMPANA,
-                "cliente_nombre": cliente,
-                "docenas_batata": float(cant_bat),
-                "docenas_membrillo": float(cant_mem),
-                "total_calculado": float(total_dinero),
-                "estado_pago": estado_pago,
-                "metodo_pago": metodo,
-                "modalidad_entrega": modalidad,
-                "direccion_envio": direccion,
-                "rango_horario": rango if modalidad == "Envio_Domicilio" else None,
-                "latitud": lat,
-                "longitud": lon
-            }
-            supabase.table("pedidos").insert(nuevo_pedido).execute()
-            st.success(f"Pedido guardado. Total calculado: ${total_dinero}")
-            st.rerun()
+        # --- SUBMIT CON VALIDACIÓN ESTRICTA DE CONTROL ---
+        if submit:
+            if not cliente.strip():
+                st.error("⚠️ El nombre del cliente es obligatorio.")
+            elif modalidad == "Envio_Domicilio" and not direccion.strip():
+                st.error("⚠️ Error de validación: Para envíos a domicilio, los campos de dirección y rango horario son obligatorios.")
+            else:
+                total_dinero = calcular_total(cant_bat, cant_mem, PRECIO_DOCENA, PRECIO_MEDIA)
+                lat, lon = obtener_coordenadas(direccion) if modalidad == "Envio_Domicilio" and direccion else (None, None)
+                
+                if modalidad == "Envio_Domicilio" and (lat is None or lon is None):
+                    st.warning("⚠️ Advertencia: No se pudieron validar las coordenadas geográficas de la dirección. El pedido se guardará, pero podría no graficarse en el mapa.")
+                
+                nuevo_pedido = {
+                    "campana_id": ID_CAMPANA,
+                    "cliente_nombre": cliente,
+                    "docenas_batata": float(cant_bat),
+                    "docenas_membrillo": float(cant_mem),
+                    "total_calculado": float(total_dinero),
+                    "estado_pago": estado_pago,
+                    "metodo_pago": metodo,
+                    "modalidad_entrega": modalidad,
+                    "direccion_envio": direccion if modalidad == "Envio_Domicilio" else None,
+                    "rango_horario": rango if modalidad == "Envio_Domicilio" else None,
+                    "latitud": lat,
+                    "longitud": lon
+                }
+                supabase.table("pedidos").insert(nuevo_pedido).execute()
+                st.success(f"Pedido guardado. Total calculado: ${total_dinero}")
+                st.rerun()
 
     st.divider()
     pedidos_req = supabase.table("pedidos").select("*").eq("campana_id", ID_CAMPANA).execute()
@@ -220,7 +232,6 @@ with tab1:
         
         # --- MÓDULO DE PRODUCCIÓN ---
         st.subheader("🧑‍🍳 Resumen de Producción")
-        # Conversión segura previa a suma matemática
         df_pedidos["docenas_batata"] = pd.to_numeric(df_pedidos["docenas_batata"], errors="coerce").fillna(0)
         df_pedidos["docenas_membrillo"] = pd.to_numeric(df_pedidos["docenas_membrillo"], errors="coerce").fillna(0)
         
@@ -239,8 +250,6 @@ with tab1:
         st.subheader("📋 Gestión de Pedidos")
         columnas_base = ["id", "cliente_nombre", "docenas_batata", "docenas_membrillo", "estado_pago", "modalidad_entrega", "total_calculado"]
         df_pedidos_edicion = df_pedidos[columnas_base].copy()
-        
-        # Casting estricto para st.data_editor
         df_pedidos_edicion["total_calculado"] = pd.to_numeric(df_pedidos_edicion["total_calculado"], errors="coerce").fillna(0)
         
         st.caption("💡 Para editar: modifica las celdas numéricas. Para eliminar un pedido: selecciona la fila izquierda y presiona 'Delete/Supr'.")
@@ -361,8 +370,6 @@ with tab2:
         st.caption("💡 Puedes editar las celdas numéricas/fechas directamente o seleccionar una fila y presionar 'Delete' para eliminarla.")
         
         df_gastos_edicion = df_gastos[["id", "descripcion", "monto", "fecha_registro"]].copy()
-        
-        # Casting estricto de tipos para prevenir el TypeCompatibility error de Streamlit
         df_gastos_edicion["monto"] = pd.to_numeric(df_gastos_edicion["monto"], errors="coerce")
         df_gastos_edicion["fecha_registro"] = pd.to_datetime(df_gastos_edicion["fecha_registro"], errors="coerce").dt.date
         
