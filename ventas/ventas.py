@@ -257,7 +257,7 @@ with tab3:
                     origen = [-55.1089, -27.4766] 
                     
                     m = folium.Map(location=[origen[1], origen[0]], zoom_start=13)
-                    folium.Marker([origen[1], origen[0]], popup="LOCAL", icon=folium.Icon(color="green", icon="home")).add_to(m)
+                    folium.Marker([origen[1], origen[0]], popup="INICIO", icon=folium.Icon(color="green", icon="home")).add_to(m)
                     
                     # 2. Llamada a la API de Optimización de OpenRouteService
                     coords_list = [[origen[0], origen[1]]] + [[row['longitud'], row['latitud']] for _, row in ready_coords.iterrows()]
@@ -273,16 +273,37 @@ with tab3:
                     
                     if res_route.status_code == 200:
                         data = res_route.json()
-                        # 3. Dibujar marcadores ROJOS en orden de ruta
-                        for step in data['routes'][0]['steps']:
-                            if step['type'] == 'job':
-                                loc = step['location']
-                                job_id = step['job']
-                                # Buscamos el nombre del cliente basado en la posición original
-                                cliente_n = ready_coords.iloc[job_id]['cliente_nombre']
-                                folium.Marker([loc[1], loc[0]], popup=f"Entrega: {cliente_n}", icon=folium.Icon(color="red")).add_to(m)
                         
-                        st.success("Ruta generada con éxito.")
+                        # --- ESTA ES LA PARTE QUE GENERA EL TRAZO ---
+                        ruta_para_dibujar = []
+                        # Agregamos el local como punto de inicio de la línea
+                        ruta_para_dibujar.append([origen[1], origen[0]]) 
+
+                        for step in data['routes'][0]['steps']:
+                            # Extraemos la ubicación de cada parada en el orden que dio la API
+                            lon_step, lat_step = step['location']
+                            ruta_para_dibujar.append([lat_step, lon_step]) # Folium usa [lat, lon]
+
+                            if step['type'] == 'job':
+                                job_id = step['job']
+                                cliente_n = ready_coords.iloc[job_id]['cliente_nombre']
+                                # Ponemos el marcador rojo
+                                folium.Marker(
+                                    [lat_step, lon_step], 
+                                    popup=f"{cliente_n}", 
+                                    icon=folium.Icon(color="red", icon="info-sign")
+                                ).add_to(m)
+
+                        # Dibujamos la línea azul que conecta todos los puntos
+                        folium.PolyLine(
+                            ruta_para_dibujar, 
+                            color="blue", 
+                            weight=3, 
+                            opacity=0.8,
+                            tooltip="Trayecto Óptimo"
+                        ).add_to(m)
+                        
+                        st.success("Ruta y trayectoria generadas con éxito.")
                         st_folium(m, width=800, height=500)
                     else:
                         # Si la API falla, mostramos al menos los puntos rojos sueltos
