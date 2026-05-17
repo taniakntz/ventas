@@ -223,13 +223,17 @@ with tab3:
             opciones = ["Todos"] + sorted(list(envios['rango_horario'].dropna().unique()))
             filt = st.selectbox("Filtrar Horario", opciones)
             df_log = envios if filt == "Todos" else envios[envios['rango_horario'] == filt]
-            
+
             st.subheader("📍 Direcciones y Horarios")
             # Acá es donde completás los datos si cambiaste de Retiro a Envío
             res_log = st.data_editor(df_log[["id", "cliente_nombre", "direccion_envio", "rango_horario"]], 
                                      column_config={"id":None, "cliente_nombre":st.column_config.TextColumn(disabled=True),
                                                     "rango_horario":st.column_config.SelectboxColumn("Horario", options=["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"])},
                                      hide_index=True, key="l_v_final")
+            
+            st.subheader("Borrador de Ruta")
+            pedidos_rango["Incluir"] = True
+            editado = st.data_editor(pedidos_rango[["cliente_nombre", "direccion_envio", "Incluir"]], hide_index=True)
             
             if st.button("📍 Actualizar Datos de Envío"):
                 st_l = st.session_state["l_v_final"]
