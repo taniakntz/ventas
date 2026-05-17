@@ -136,7 +136,7 @@ with tab1:
     if pedidos_req.data:
         df = pd.DataFrame(pedidos_req.data)
         
-        # Resumen Producción
+        # --- MÓDULO DE PRODUCCIÓN ---
         st.subheader("🧑‍🍳 Producción")
         df["docenas_batata"] = pd.to_numeric(df["docenas_batata"], errors="coerce").fillna(0)
         df["docenas_membrillo"] = pd.to_numeric(df["docenas_membrillo"], errors="coerce").fillna(0)
@@ -147,32 +147,59 @@ with tab1:
         c3.metric("Total", decimal_a_fraccion(b_t + m_t))
 
         st.subheader("📋 Gestión de Pedidos")
+        # 1. Seleccionamos columnas
         df_ed = df[["id", "cliente_nombre", "docenas_batata", "docenas_membrillo", "estado_pago", "modalidad_entrega", "total_calculado"]].copy()
-        df_ed["total_calculado"] = pd.to_numeric(df_ed["total_calculado"]).fillna(0)
         
-        res_ed = st.data_editor(df_ed, column_config={
-            "id": None, 
-            "total_calculado": st.column_config.NumberColumn("Total", disabled=True),
-            "modalidad_entrega": st.column_config.SelectboxColumn("Entrega", options=["Retiro_Local", "Envio_Domicilio"]),
-            "estado_pago": st.column_config.SelectboxColumn("Pago", options=["Pendiente", "Pagado"]) # <-- MODIFICACIÓN AQUÍ
-        }, num_rows="dynamic", hide_index=True, key="p_v_final_pago")
+        # 2. LIMPIEZA PREVENTIVA: Forzamos valores para que no aparezca el "blanco"
+        df_ed["total_calculado"] = pd.to_numeric(df_ed["total_calculado"]).fillna(0)
+        df_ed["estado_pago"] = df_ed["estado_pago"].replace([None, "", "nan"], "Pendiente")
+        df_ed["modalidad_entrega"] = df_ed["modalidad_entrega"].replace([None, "", "nan"], "Retiro_Local")
+        
+        # 3. EDITOR CON RESTRICCIÓN 'REQUIRED'
+        res_ed = st.data_editor(
+            df_ed, 
+            column_config={
+                "id": None, 
+                "total_calculado": st.column_config.NumberColumn("Total", disabled=True),
+                "modalidad_entrega": st.column_config.SelectboxColumn("Entrega", options=["Retiro_Local", "Envio_Domicilio"], required=True),
+                "estado_pago": st.column_config.SelectboxColumn("Pago", options=["Pendiente", "Pagado"], required=True)
+            }, 
+            num_rows="dynamic", 
+            hide_index=True, 
+            key="p_v_final_strict" # Cambiamos la key para resetear la caché visual
+        )
 
         if st.button("💾 Guardar Cambios"):
-            state = st.session_state["p_v_final_pago"]
-            for idx_str, mods in state["edited_rows"].items():
-                idx = int(idx_str)
-                rid = df_ed.iloc[idx]["id"]
-                if mods.get("modalidad_entrega") == "Retiro_Local":
-                    mods.update({"direccion_envio": None, "rango_horario": None, "latitud": None, "longitud": None})
-                if "docenas_batata" in mods or "docenas_membrillo" in mods:
-                    nb = mods.get("docenas_batata", df_ed.iloc[idx]["docenas_batata"])
-                    nm = mods.get("docenas_membrillo", df_ed.iloc[idx]["docenas_membrillo"])
-                    mods["total_calculado"] = calcular_total(nb, nm, PRECIO_DOCENA, PRECIO_MEDIA)
-                supabase.table("pedidos").update(mods).eq("id", rid).execute()
-            for idx in state["deleted_rows"]:
-                supabase.table("pedidos").delete().eq("id", df_ed.iloc[idx]["id"]).execute()
-            st.rerun()
-
+            state = st.session_state["p_v_final_strict"]
+            try:
+                # Procesar ediciones
+                if state["edited_rows"]:
+                    for idx_str, mods in state["edited_rows"].items():
+                        idx = int(idx_str)
+                        rid = df_ed.iloc[idx]["id"]
+                        
+                        # Si cambia a Retiro, limpiamos logística
+                        if mods.get("modalidad_entrega") == "Retiro_Local":
+                            mods.update({"direccion_envio": None, "rango_horario": None, "latitud": None, "longitud": None})
+                        
+                        # Recálculo de total si cambian cantidades
+                        if "docenas_batata" in mods or "docenas_membrillo" in mods:
+                            nb = mods.get("docenas_batata", df_ed.iloc[idx]["docenas_batata"])
+                            nm = mods.get("docenas_membrillo", df_ed.iloc[idx]["docenas_membrillo"])
+                            mods["total_calculado"] = calcular_total(nb, nm, PRECIO_DOCENA, PRECIO_MEDIA)
+                        
+                        supabase.table("pedidos").update(mods).eq("id", rid).execute()
+                
+                # Procesar eliminaciones
+                if state["deleted_rows"]:
+                    for idx in state["deleted_rows"]:
+                        rid = df_ed.iloc[idx]["id"]
+                        supabase.table("pedidos").delete().eq("id", rid).execute()
+                
+                st.success("Base de datos actualizada.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error al guardar: {e}")
 # --- PESTAÑA 2: FINANZAS ---
 with tab2:
     st.header("📈 Balance")
