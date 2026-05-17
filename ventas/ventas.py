@@ -231,10 +231,6 @@ with tab3:
                                                     "rango_horario":st.column_config.SelectboxColumn("Horario", options=["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"])},
                                      hide_index=True, key="l_v_final")
             
-            st.subheader("Borrador de Ruta")
-            pedidos_rango["Incluir"] = True
-            editado = st.data_editor(pedidos_rango[["cliente_nombre", "direccion_envio", "Incluir"]], hide_index=True)
-            
             if st.button("📍 Actualizar Datos de Envío"):
                 st_l = st.session_state["l_v_final"]
                 for i_s, m in st_l["edited_rows"].items():
