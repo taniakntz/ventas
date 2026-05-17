@@ -99,7 +99,6 @@ tab1, tab2, tab3, tab4 = st.tabs(["📦 Pedidos", "📈 Finanzas", "🚚 Reparto
 with tab1:
     st.header("📝 Nuevo Pedido")
     
-    # Contenedor reactivo (sin st.form para evitar el bloqueo de interfaz)
     c_nom = st.text_input("Nombre del Cliente", key="in_nom")
     col1, col2 = st.columns(2)
     with col1: c_bat = st.number_input("Batata (Docenas)", 0.0, step=0.25, key="in_bat")
@@ -109,7 +108,6 @@ with tab1:
     with col3: c_mod = st.selectbox("Entrega", ["Retiro_Local", "Envio_Domicilio"], key="in_mod")
     with col4: c_pag = st.selectbox("Estado de Pago", ["Pendiente", "Pagado"], key="in_pag")
     
-    # REACTIVIDAD: Estos campos aparecen solo si es Envío
     c_dir, c_ran = None, None
     if c_mod == "Envio_Domicilio":
         c_dir = st.text_input("Dirección de Envío", placeholder="Calle 123, Ciudad", key="in_dir")
@@ -148,25 +146,24 @@ with tab1:
         c2.metric("Membrillo", decimal_a_fraccion(m_t))
         c3.metric("Total", decimal_a_fraccion(b_t + m_t))
 
-        # Editor Simplificado (Sin dirección/horario por pedido del usuario)
         st.subheader("📋 Gestión de Pedidos")
         df_ed = df[["id", "cliente_nombre", "docenas_batata", "docenas_membrillo", "estado_pago", "modalidad_entrega", "total_calculado"]].copy()
         df_ed["total_calculado"] = pd.to_numeric(df_ed["total_calculado"]).fillna(0)
         
         res_ed = st.data_editor(df_ed, column_config={
-            "id": None, "total_calculado": st.column_config.NumberColumn("Total", disabled=True),
-            "modalidad_entrega": st.column_config.SelectboxColumn("Entrega", options=["Retiro_Local", "Envio_Domicilio"])
-        }, num_rows="dynamic", hide_index=True, key="p_v_final")
+            "id": None, 
+            "total_calculado": st.column_config.NumberColumn("Total", disabled=True),
+            "modalidad_entrega": st.column_config.SelectboxColumn("Entrega", options=["Retiro_Local", "Envio_Domicilio"]),
+            "estado_pago": st.column_config.SelectboxColumn("Pago", options=["Pendiente", "Pagado"]) # <-- MODIFICACIÓN AQUÍ
+        }, num_rows="dynamic", hide_index=True, key="p_v_final_pago")
 
         if st.button("💾 Guardar Cambios"):
-            state = st.session_state["p_v_final"]
+            state = st.session_state["p_v_final_pago"]
             for idx_str, mods in state["edited_rows"].items():
                 idx = int(idx_str)
                 rid = df_ed.iloc[idx]["id"]
-                # Sanitización: si cambia a Retiro, borramos datos logísticos
                 if mods.get("modalidad_entrega") == "Retiro_Local":
                     mods.update({"direccion_envio": None, "rango_horario": None, "latitud": None, "longitud": None})
-                # Recálculo si cambian docenas
                 if "docenas_batata" in mods or "docenas_membrillo" in mods:
                     nb = mods.get("docenas_batata", df_ed.iloc[idx]["docenas_batata"])
                     nm = mods.get("docenas_membrillo", df_ed.iloc[idx]["docenas_membrillo"])
@@ -216,7 +213,6 @@ with tab2:
 # --- PESTAÑA 3: REPARTO ---
 with tab3:
     st.header("🚚 Logística")
-    # Inicializamos variables de estado para no perder créditos
     if "datos_ruta_cache" not in st.session_state: st.session_state.datos_ruta_cache = None
     if "ids_en_ruta" not in st.session_state: st.session_state.ids_en_ruta = []
 
@@ -244,23 +240,19 @@ with tab3:
                         lat, lon = obtener_coordenadas(m["direccion_envio"])
                         m.update({"latitud": lat, "longitud": lon})
                     supabase.table("pedidos").update(m).eq("id", rid).execute()
-                # Al actualizar datos, forzamos que se tenga que volver a generar la ruta
                 st.session_state.datos_ruta_cache = None 
                 st.rerun()
 
-            # BOTÓN INTELIGENTE: Solo gasta API si es necesario
             if col_l2.button("🗺️ Generar/Ver Ruta Óptima"):
                 ready_ids = res_log[res_log['Incluir'] == True]['id'].tolist()
                 
-                # ¿Cambiaron los pedidos o es la primera vez?
                 if st.session_state.datos_ruta_cache is None or ready_ids != st.session_state.ids_en_ruta:
-                    with st.spinner("Calculando ruta real por calles (gastando 1 crédito API)..."):
+                    with st.spinner("Calculando ruta real..."):
                         ready_coords = df_log[(df_log['id'].isin(ready_ids)) & (df_log['latitud'].notnull())]
                         
                         if len(ready_coords) >= 1:
-                            origen = [-55.1089, -27.4766] # [LON, LAT]
+                            origen = [-55.1089, -27.4766] 
                             
-                            # 1. Optimización (VRP)
                             body_vrp = {
                                 "vehicles": [{"id": 1, "profile": "driving-car", "start": origen, "end": origen}],
                                 "jobs": [{"id": i, "location": [row['longitud'], row['latitud']]} for i, (_, row) in enumerate(ready_coords.iterrows())]
@@ -271,7 +263,7 @@ with tab3:
                             if res_vrp.status_code == 200:
                                 data_vrp = res_vrp.json()
                                 orden_coords = [origen]
-                                info_clientes = [] # Guardamos nombres para los marcadores
+                                info_clientes = []
 
                                 for step in data_vrp['routes'][0]['steps']:
                                     lon_s, lat_s = step['location']
@@ -280,41 +272,28 @@ with tab3:
                                         c_n = ready_coords.iloc[step['job']]['cliente_nombre']
                                         info_clientes.append({"lat": lat_s, "lon": lon_s, "nombre": c_n})
 
-                                # 2. Directions (Calles reales)
                                 body_dir = {"coordinates": orden_coords}
                                 res_dir = requests.post("https://api.openrouteservice.org/v2/directions/driving-car/geojson", json=body_dir, headers=headers)
                                 
                                 if res_dir.status_code == 200:
-                                    # Guardamos TODO en el cache
                                     st.session_state.datos_ruta_cache = {
                                         "geojson": res_dir.json(),
                                         "clientes": info_clientes,
                                         "origen": [origen[1], origen[0]]
                                     }
                                     st.session_state.ids_en_ruta = ready_ids
-                                else:
-                                    st.error("Error en la geometría de calles.")
-                            else:
-                                st.error("Error en el optimizador. Verificá tu API Key.")
-                        else:
-                            st.warning("Seleccioná pedidos con direcciones válidas.")
 
-            # DIBUJO DEL MAPA DESDE EL CACHE (No gasta créditos)
             if st.session_state.datos_ruta_cache:
                 cache = st.session_state.datos_ruta_cache
                 m = folium.Map(location=cache["origen"], zoom_start=14)
                 folium.Marker(cache["origen"], popup="LOCAL", icon=folium.Icon(color="green", icon="home")).add_to(m)
                 
-                # Dibujamos marcadores de clientes guardados
                 for c in cache["clientes"]:
                     folium.Marker([c["lat"], c["lon"]], popup=f"Cliente: {c['nombre']}", icon=folium.Icon(color="red")).add_to(m)
                 
-                # Dibujamos la línea de la calle guardada
-                folium.GeoJson(cache["geojson"], name="Ruta Real", 
-                               style_function=lambda x: {'color': 'blue', 'weight': 5, 'opacity': 0.7}).add_to(m)
+                folium.GeoJson(cache["geojson"], style_function=lambda x: {'color': 'blue', 'weight': 5, 'opacity': 0.7}).add_to(m)
                 
                 st_folium(m, width=800, height=500, key="mapa_reparto")
-                st.info("💡 Estás viendo una ruta guardada. Si agregas pedidos o cambias el filtro, pulsa el botón de nuevo.")
         else:
             st.info("No hay pedidos con envío a domicilio.")
             
