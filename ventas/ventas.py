@@ -25,6 +25,8 @@ def check_password():
     def password_entered():
         if st.session_state["username"] in st.secrets["passwords"] and st.session_state["password"] == st.secrets["passwords"][st.session_state["username"]]:
             st.session_state["password_correct"] = True
+            # Guardamos el usuario en una variable que Streamlit no borrará
+            st.session_state["usuario_logeado"] = st.session_state["username"] 
             del st.session_state["password"] 
         else:
             st.session_state["password_correct"] = False
@@ -104,7 +106,7 @@ def exportar_excel(dataframe):
     return output.getvalue()
 
 # --- 5. INTERFAZ PRINCIPAL ---
-st.sidebar.title(f"👤 {st.session_state['username']}")
+st.sidebar.title(f"👤 {st.session_state.get('usuario_logeado', 'Usuario')}")
 if st.sidebar.button("Cerrar Sesión"):
     st.session_state.clear()
     st.rerun()
