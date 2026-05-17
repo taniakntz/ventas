@@ -25,7 +25,7 @@ def check_password():
     def password_entered():
         if st.session_state["username"] in st.secrets["passwords"] and st.session_state["password"] == st.secrets["passwords"][st.session_state["username"]]:
             st.session_state["password_correct"] = True
-            # Guardamos el usuario en una variable que Streamlit no borrará
+            # Variable permanente para evitar KeyError post-renderizado
             st.session_state["usuario_logeado"] = st.session_state["username"] 
             del st.session_state["password"] 
         else:
@@ -49,7 +49,24 @@ if not check_password():
     st.stop()
 
 # --- 4. LÓGICA DE NEGOCIO Y UTILIDADES ---
-MAPA_FRACCIONES = {"0": 0.0, "1/4": 0.25, "1/2": 0.5, "3/4": 0.75}
+
+def decimal_a_fraccion(valor):
+    if pd.isna(valor) or valor == 0:
+        return "0"
+    entero = int(valor)
+    decimal = valor - entero
+    frac_str = ""
+    
+    if decimal == 0.25: frac_str = "1/4"
+    elif decimal == 0.5: frac_str = "1/2"
+    elif decimal == 0.75: frac_str = "3/4"
+
+    if entero == 0:
+        return frac_str if frac_str else str(valor)
+    elif frac_str:
+        return f"{entero} {frac_str}"
+    else:
+        return str(entero)
 
 def calcular_total(batata, membrillo, precio_doc, precio_med):
     total_docenas = batata + membrillo
@@ -70,7 +87,6 @@ def calcular_total(batata, membrillo, precio_doc, precio_med):
     return total
 
 def obtener_coordenadas(direccion):
-    # API Gratuita de Nominatim (Requiere User-Agent)
     url = f"https://nominatim.openstreetmap.org/search?q={direccion}&format=json&limit=1"
     headers = {'User-Agent': 'PastelitosApp/1.0'}
     response = requests.get(url, headers=headers)
@@ -139,7 +155,7 @@ if campanas_df.empty:
                 }).execute()
                 st.success("Campaña creada. Recargando el sistema...")
                 st.rerun()
-    st.stop() # Frena la ejecución aquí hasta que exista una campaña
+    st.stop()
 
 # --- EJECUCIÓN NORMAL: SI HAY CAMPAÑAS ---
 campana_activa = st.sidebar.selectbox("Seleccionar Campaña Activa", campanas_df['nombre_campana'].tolist())
@@ -161,11 +177,9 @@ with tab1:
     with st.form("form_pedido", clear_on_submit=True):
         cliente = st.text_input("Nombre del Cliente")
         
-        col1, col2, col3, col4 = st.columns(4)
-        with col1: ent_bat = st.number_input("Batata (Enteros)", min_value=0, step=1)
-        with col2: frac_bat = st.selectbox("Batata (Fracción)", list(MAPA_FRACCIONES.keys()))
-        with col3: ent_mem = st.number_input("Membrillo (Enteros)", min_value=0, step=1)
-        with col4: frac_mem = st.selectbox("Membrillo (Fracción)", list(MAPA_FRACCIONES.keys()))
+        col1, col2 = st.columns(2)
+        with col1: cant_bat = st.number_input("Batata (Docenas)", min_value=0.0, step=0.25, format="%.2f")
+        with col2: cant_mem = st.number_input("Membrillo (Docenas)", min_value=0.0, step=0.25, format="%.2f")
         
         col_m, col_p = st.columns(2)
         with col_m:
@@ -179,17 +193,14 @@ with tab1:
         submit = st.form_submit_button("Guardar Pedido")
         
         if submit and cliente:
-            batata_total = ent_bat + MAPA_FRACCIONES[frac_bat]
-            membrillo_total = ent_mem + MAPA_FRACCIONES[frac_mem]
-            total_dinero = calcular_total(batata_total, membrillo_total, PRECIO_DOCENA, PRECIO_MEDIA)
-            
+            total_dinero = calcular_total(cant_bat, cant_mem, PRECIO_DOCENA, PRECIO_MEDIA)
             lat, lon = obtener_coordenadas(direccion) if modalidad == "Envio_Domicilio" and direccion else (None, None)
             
             nuevo_pedido = {
                 "campana_id": ID_CAMPANA,
                 "cliente_nombre": cliente,
-                "docenas_batata": float(batata_total),
-                "docenas_membrillo": float(membrillo_total),
+                "docenas_batata": float(cant_bat),
+                "docenas_membrillo": float(cant_mem),
                 "total_calculado": float(total_dinero),
                 "estado_pago": estado_pago,
                 "metodo_pago": metodo,
@@ -203,32 +214,114 @@ with tab1:
             st.success(f"Pedido guardado. Total calculado: ${total_dinero}")
             st.rerun()
 
-    # Vista de Base de Datos
+    # Vista de Base de Datos y CRUD
     st.divider()
-    st.subheader("📋 Pedidos de la Campaña")
     pedidos_req = supabase.table("pedidos").select("*").eq("campana_id", ID_CAMPANA).execute()
     if pedidos_req.data:
         df_pedidos = pd.DataFrame(pedidos_req.data)
-        # Cálculo dinámico para la vista
-        df_pedidos["Docenas Totales"] = df_pedidos["docenas_batata"] + df_pedidos["docenas_membrillo"]
-        st.dataframe(df_pedidos[["cliente_nombre", "Docenas Totales", "total_calculado", "estado_pago", "modalidad_entrega"]], use_container_width=True)
         
-        excel_data = exportar_excel(df_pedidos)
+        # --- MÓDULO DE PRODUCCIÓN (TOTALES GLOBALES) ---
+        st.subheader("🧑‍🍳 Resumen de Producción")
+        total_batata = df_pedidos["docenas_batata"].sum()
+        total_membrillo = df_pedidos["docenas_membrillo"].sum()
+        gran_total = total_batata + total_membrillo
+        
+        col_prod1, col_prod2, col_prod3 = st.columns(3)
+        col_prod1.metric("Total Batata", decimal_a_fraccion(total_batata))
+        col_prod2.metric("Total Membrillo", decimal_a_fraccion(total_membrillo))
+        col_prod3.metric("Producción Total", decimal_a_fraccion(gran_total))
+        
+        st.divider()
+        
+        # --- VISTA DETALLADA POR CLIENTE Y EDICIÓN ---
+        st.subheader("📋 Gestión de Pedidos")
+        columnas_base = ["id", "cliente_nombre", "docenas_batata", "docenas_membrillo", "estado_pago", "modalidad_entrega", "total_calculado"]
+        df_pedidos_edicion = df_pedidos[columnas_base].copy()
+        
+        st.caption("💡 Para editar: modifica las celdas (cantidades en decimal). Para eliminar un pedido: selecciona la fila izquierda y presiona 'Delete/Supr'.")
+        
+        editor_pedidos = st.data_editor(
+            df_pedidos_edicion,
+            column_config={
+                "id": None,
+                "cliente_nombre": st.column_config.TextColumn("Cliente", required=True),
+                "docenas_batata": st.column_config.NumberColumn("Batata (Decimal)", min_value=0.0, step=0.25, required=True),
+                "docenas_membrillo": st.column_config.NumberColumn("Membrillo (Decimal)", min_value=0.0, step=0.25, required=True),
+                "estado_pago": st.column_config.SelectboxColumn("Pago", options=["Pendiente", "Pagado"], required=True),
+                "modalidad_entrega": st.column_config.SelectboxColumn("Entrega", options=["Retiro_Local", "Envio_Domicilio"], required=True),
+                "total_calculado": st.column_config.NumberColumn("Total Cobrado ($)", disabled=True) 
+            },
+            num_rows="dynamic",
+            hide_index=True,
+            key="editor_pedidos_tabla"
+        )
+        
+        if st.button("💾 Guardar Cambios en Pedidos"):
+            estado_pedidos = st.session_state["editor_pedidos_tabla"]
+            try:
+                # Actualización de datos modificados
+                if estado_pedidos["edited_rows"]:
+                    for idx_str, cambios in estado_pedidos["edited_rows"].items():
+                        idx = int(idx_str)
+                        pedido_id = df_pedidos_edicion.iloc[idx]["id"]
+                        
+                        batata_actual = float(df_pedidos_edicion.iloc[idx]["docenas_batata"])
+                        membrillo_actual = float(df_pedidos_edicion.iloc[idx]["docenas_membrillo"])
+                        
+                        nueva_batata = float(cambios.get("docenas_batata", batata_actual))
+                        nuevo_membrillo = float(cambios.get("docenas_membrillo", membrillo_actual))
+                        
+                        # Recálculo si hay alteración en cantidades
+                        if "docenas_batata" in cambios or "docenas_membrillo" in cambios:
+                            cambios["total_calculado"] = float(calcular_total(nueva_batata, nuevo_membrillo, PRECIO_DOCENA, PRECIO_MEDIA))
+                        
+                        supabase.table("pedidos").update(cambios).eq("id", pedido_id).execute()
+
+                # Ejecución de eliminación (DELETE)
+                if estado_pedidos["deleted_rows"]:
+                    for idx in estado_pedidos["deleted_rows"]:
+                        pedido_id = df_pedidos_edicion.iloc[idx]["id"]
+                        supabase.table("pedidos").delete().eq("id", pedido_id).execute()
+
+                st.success("Actualización consolidada en la base de datos.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error de ejecución SQL: {e}")
+        
+        # --- EXPORTACIÓN AL EXCEL ---
+        st.divider()
+        df_excel = df_pedidos.copy()
+        df_excel["Batata"] = df_excel["docenas_batata"].apply(decimal_a_fraccion)
+        df_excel["Membrillo"] = df_excel["docenas_membrillo"].apply(decimal_a_fraccion)
+        
+        excel_data = exportar_excel(df_excel[["cliente_nombre", "Batata", "Membrillo", "total_calculado", "estado_pago", "modalidad_entrega"]])
         st.download_button("📥 Descargar Planilla Excel (Formato A4)", data=excel_data, file_name=f"pedidos_{campana_activa}.xlsx")
+
+        # --- ZONA DE PELIGRO: PURGA DE DATOS ---
+        st.divider()
+        with st.expander("⚠️ Zona de Peligro: Eliminar todos los pedidos"):
+            st.error("Alerta: Esta instrucción ejecutará un DELETE masivo sin condicionales de estado. Perderás todo el registro financiero asociado a estos pedidos.")
+            confirmacion = st.checkbox("Comprendo el riesgo. Desbloquear botón de purga.")
+            if confirmacion:
+                if st.button("🚨 Eliminar Todos los Pedidos de esta Campaña", type="primary"):
+                    supabase.table("pedidos").delete().eq("campana_id", ID_CAMPANA).execute()
+                    st.success("Comando ejecutado. Los registros fueron eliminados permanentemente.")
+                    st.rerun()
+    else:
+        st.info("No hay pedidos registrados en esta campaña.")
 
 # --- PESTAÑA 2: FINANZAS (Módulo de Rentabilidad) ---
 with tab2:
     st.header("📈 Balance Financiero")
     
-    # Obtener ingresos reales (Solo PAGADO)
     if not pedidos_req.data:
         ingresos_totales = 0
     else:
         df_ped = pd.DataFrame(pedidos_req.data)
         ingresos_totales = df_ped[df_ped['estado_pago'] == 'Pagado']['total_calculado'].sum()
 
-    # Obtener gastos
     gastos_req = supabase.table("gastos").select("*").eq("campana_id", ID_CAMPANA).execute()
+    df_gastos = pd.DataFrame()
     gastos_totales = 0
     if gastos_req.data:
         df_gastos = pd.DataFrame(gastos_req.data)
@@ -241,14 +334,65 @@ with tab2:
     col_m2.metric("Gastos Operativos", f"${gastos_totales:,.2f}")
     col_m3.metric("Ganancia Neta", f"${rentabilidad:,.2f}", delta=float(rentabilidad))
 
-    st.subheader("Añadir Gasto")
+    st.divider()
+
+    st.subheader("➕ Registrar Nuevo Gasto")
     with st.form("form_gasto", clear_on_submit=True):
-        desc = st.text_input("Descripción (Ej: Cajas, Aceite)")
-        monto = st.number_input("Monto", min_value=0.0, step=100.0)
+        desc = st.text_input("Descripción del Insumo (Ej: Cajas, Aceite, Harina)")
+        monto = st.number_input("Monto total ($)", min_value=0.0, step=100.0, format="%.2f")
         if st.form_submit_button("Registrar Gasto") and desc:
-            supabase.table("gastos").insert({"campana_id": ID_CAMPANA, "descripcion": desc, "monto": monto, "fecha_registro": str(date.today())}).execute()
-            st.success("Gasto registrado")
+            supabase.table("gastos").insert({
+                "campana_id": ID_CAMPANA, 
+                "descripcion": desc, 
+                "monto": monto, 
+                "fecha_registro": str(date.today())
+            }).execute()
+            st.success("Gasto registrado con éxito.")
             st.rerun()
+
+    st.divider()
+
+    st.subheader("📋 Historial y Edición de Gastos")
+    if not df_gastos.empty:
+        st.caption("💡 Puedes editar las celdas directamente o seleccionar una fila y presionar 'Delete' para eliminarla.")
+        
+        df_gastos_edicion = df_gastos[["id", "descripcion", "monto", "fecha_registro"]].copy()
+        
+        gastos_editados = st.data_editor(
+            df_gastos_edicion,
+            column_config={
+                "id": None, 
+                "descripcion": st.column_config.TextColumn("Descripción del Gasto", required=True),
+                "monto": st.column_config.NumberColumn("Monto ($)", min_value=0.0, format="$%.2f", required=True),
+                "fecha_registro": st.column_config.DateColumn("Fecha de Registro", required=True)
+            },
+            num_rows="dynamic",
+            hide_index=True,
+            key="editor_gastos_tabla"
+        )
+        
+        if st.button("💾 Guardar Cambios en Gastos"):
+            estado_cambios = st.session_state["editor_gastos_tabla"]
+            try:
+                if estado_cambios["edited_rows"]:
+                    for idx_str, columnas_modificadas in estado_cambios["edited_rows"].items():
+                        idx = int(idx_str)
+                        gasto_id = df_gastos_edicion.iloc[idx]["id"]
+                        if "fecha_registro" in columnas_modificadas and not isinstance(columnas_modificadas["fecha_registro"], str):
+                            columnas_modificadas["fecha_registro"] = str(columnas_modificadas["fecha_registro"])
+                        supabase.table("gastos").update(columnas_modificadas).eq("id", gasto_id).execute()
+
+                if estado_cambios["deleted_rows"]:
+                    for idx in estado_cambios["deleted_rows"]:
+                        gasto_id = df_gastos_edicion.iloc[idx]["id"]
+                        supabase.table("gastos").delete().eq("id", gasto_id).execute()
+
+                st.success("Base de datos de gastos actualizada correctamente.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error crítico durante la persistencia de datos: {e}")
+    else:
+        st.info("No existen gastos registrados en la campaña activa.")
 
 # --- PESTAÑA 3: REPARTO (Lógica de Enrutamiento y Mapa) ---
 with tab3:
@@ -262,7 +406,6 @@ with tab3:
             pedidos_rango = envios[envios['rango_horario'] == rango_seleccionado].copy()
             
             st.subheader("Borrador de Ruta")
-            # Interfaz para marcar/desmarcar pedidos por stock (True por defecto)
             pedidos_rango["Incluir"] = True
             editado = st.data_editor(pedidos_rango[["cliente_nombre", "direccion_envio", "Incluir"]], hide_index=True)
             
@@ -273,7 +416,6 @@ with tab3:
                 else:
                     with st.spinner("Calculando ruta óptima con OpenRouteService..."):
                         coordenadas = [[row['longitud'], row['latitud']] for _, row in pedidos_confirmados.iterrows()]
-                        # Punto de partida
                         origen = [-55.108986,-27.476643] 
                         jobs = [{"id": i, "location": coord} for i, coord in enumerate(coordenadas)]
                         
@@ -287,7 +429,6 @@ with tab3:
                         if res.status_code == 200:
                             st.success("Ruta generada.")
                             data = res.json()
-                            # Dibujar mapa con Folium
                             m = folium.Map(location=[origen[1], origen[0]], zoom_start=13)
                             folium.Marker([origen[1], origen[0]], popup="LOCAL", icon=folium.Icon(color="red")).add_to(m)
                             
