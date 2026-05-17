@@ -221,7 +221,7 @@ with tab3:
     if pedidos_req.data:
         envios = df[df['modalidad_entrega'] == "Envio_Domicilio"].copy()
         if not envios.empty:
-            filt = st.selectbox("Filtro", ["Todos"] + list(envios['rango_horario'].dropna().unique()))
+            filt = st.selectbox("Filtro Horario", ["Todos"] + sorted(list(envios['rango_horario'].dropna().unique())))
             df_log = envios if filt == "Todos" else envios[envios['rango_horario'] == filt]
             df_log["Incluir"] = True
             
@@ -244,19 +244,56 @@ with tab3:
                     supabase.table("pedidos").update(m).eq("id", rid).execute()
                 st.rerun()
 
-            if col_l2.button("🗺️ Ver Mapa"): st.session_state.ver_mapa = True
+            if col_l2.button("🗺️ Generar Ruta Óptima"):
+                st.session_state.ver_mapa = True
 
-            # Mostrar mapa solo si el estado es True
             if st.session_state.ver_mapa:
+                # 1. Obtener puntos seleccionados con coordenadas
                 ready_ids = res_log[res_log['Incluir'] == True]['id'].tolist()
                 ready_coords = df_log[(df_log['id'].isin(ready_ids)) & (df_log['latitud'].notnull())]
-                if not ready_coords.empty:
-                    m = folium.Map(location=[-27.4766, -55.1089], zoom_start=13)
-                    for _, r in ready_coords.iterrows():
-                        folium.Marker([r['latitud'], r['longitud']], popup=r['cliente_nombre']).add_to(m)
-                    st_folium(m, width=700)
-                else: st.warning("No hay pedidos seleccionados con coordenadas.")
-        else: st.info("No hay pedidos con envío.")
+                
+                if len(ready_coords) >= 1:
+                    # Punto de origen (Local)
+                    origen = [-55.1089, -27.4766] 
+                    
+                    m = folium.Map(location=[origen[1], origen[0]], zoom_start=13)
+                    folium.Marker([origen[1], origen[0]], popup="LOCAL", icon=folium.Icon(color="green", icon="home")).add_to(m)
+                    
+                    # 2. Llamada a la API de Optimización de OpenRouteService
+                    coords_list = [[origen[0], origen[1]]] + [[row['longitud'], row['latitud']] for _, row in ready_coords.iterrows()]
+                    
+                    body = {
+                        "vehicles": [{"id": 1, "profile": "driving-car", "start": [origen[0], origen[1]], "end": [origen[0], origen[1]]}],
+                        "jobs": [{"id": i, "location": [row['longitud'], row['latitud']]} for i, (_, row) in enumerate(ready_coords.iterrows())]
+                    }
+                    headers = {"Authorization": st.secrets["ORS_API_KEY"], "Content-Type": "application/json"}
+                    
+                    with st.spinner("Calculando ruta..."):
+                        res_route = requests.post("https://api.openrouteservice.org/optimization", json=body, headers=headers)
+                    
+                    if res_route.status_code == 200:
+                        data = res_route.json()
+                        # 3. Dibujar marcadores ROJOS en orden de ruta
+                        for step in data['routes'][0]['steps']:
+                            if step['type'] == 'job':
+                                loc = step['location']
+                                job_id = step['job']
+                                # Buscamos el nombre del cliente basado en la posición original
+                                cliente_n = ready_coords.iloc[job_id]['cliente_nombre']
+                                folium.Marker([loc[1], loc[0]], popup=f"Entrega: {cliente_n}", icon=folium.Icon(color="red")).add_to(m)
+                        
+                        st.success("Ruta generada con éxito.")
+                        st_folium(m, width=800, height=500)
+                    else:
+                        # Si la API falla, mostramos al menos los puntos rojos sueltos
+                        for _, row in ready_coords.iterrows():
+                            folium.Marker([row['latitud'], row['longitud']], popup=row['cliente_nombre'], icon=folium.Icon(color="red")).add_to(m)
+                        st_folium(m, width=800, height=500)
+                        st.warning("No se pudo trazar la línea de ruta (Verificá tu API Key), pero se muestran los puntos de entrega.")
+                else:
+                    st.warning("Seleccioná al menos un pedido con dirección válida.")
+        else:
+            st.info("No hay pedidos con envío.")
             
 # --- PESTAÑA 4: CONFIGURACIÓN ---
 with tab4:
