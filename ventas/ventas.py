@@ -265,22 +265,26 @@ with tab1:
         
         # --- VISTA DETALLADA POR CLIENTE Y EDICIÓN ---
         st.subheader("📋 Gestión de Pedidos")
-        columnas_base = ["id", "cliente_nombre", "docenas_batata", "docenas_membrillo", "estado_pago", "modalidad_entrega", "total_calculado"]
+        
+        # Agregamos las columnas logísticas a la vista de edición
+        columnas_base = ["id", "cliente_nombre", "docenas_batata", "docenas_membrillo", "estado_pago", "modalidad_entrega", "direccion_envio", "rango_horario", "total_calculado"]
         df_pedidos_edicion = df_pedidos[columnas_base].copy()
         df_pedidos_edicion["total_calculado"] = pd.to_numeric(df_pedidos_edicion["total_calculado"], errors="coerce").fillna(0)
         
-        st.caption("💡 Para editar: modifica las celdas numéricas. Para eliminar un pedido: selecciona la fila izquierda y presiona 'Delete/Supr'.")
+        st.caption("💡 Para editar: modifica las celdas numéricas o direcciones. Para eliminar un pedido: selecciona la fila izquierda y presiona 'Delete/Supr'.")
         
         editor_pedidos = st.data_editor(
             df_pedidos_edicion,
             column_config={
                 "id": None,
                 "cliente_nombre": st.column_config.TextColumn("Cliente", required=True),
-                "docenas_batata": st.column_config.NumberColumn("Batata (Decimal)", min_value=0.0, step=0.25, required=True),
-                "docenas_membrillo": st.column_config.NumberColumn("Membrillo (Decimal)", min_value=0.0, step=0.25, required=True),
+                "docenas_batata": st.column_config.NumberColumn("Batata", min_value=0.0, step=0.25, required=True),
+                "docenas_membrillo": st.column_config.NumberColumn("Membrillo", min_value=0.0, step=0.25, required=True),
                 "estado_pago": st.column_config.SelectboxColumn("Pago", options=["Pendiente", "Pagado"], required=True),
                 "modalidad_entrega": st.column_config.SelectboxColumn("Entrega", options=["Retiro_Local", "Envio_Domicilio"], required=True),
-                "total_calculado": st.column_config.NumberColumn("Total Cobrado ($)", disabled=True) 
+                "direccion_envio": st.column_config.TextColumn("Dirección"),
+                "rango_horario": st.column_config.SelectboxColumn("Horario", options=["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"]),
+                "total_calculado": st.column_config.NumberColumn("Total ($)", disabled=True) 
             },
             num_rows="dynamic",
             hide_index=True,
@@ -295,14 +299,30 @@ with tab1:
                         idx = int(idx_str)
                         pedido_id = df_pedidos_edicion.iloc[idx]["id"]
                         
+                        # Variables financieras
                         batata_actual = float(df_pedidos_edicion.iloc[idx]["docenas_batata"])
                         membrillo_actual = float(df_pedidos_edicion.iloc[idx]["docenas_membrillo"])
-                        
                         nueva_batata = float(cambios.get("docenas_batata", batata_actual))
                         nuevo_membrillo = float(cambios.get("docenas_membrillo", membrillo_actual))
                         
                         if "docenas_batata" in cambios or "docenas_membrillo" in cambios:
                             cambios["total_calculado"] = float(calcular_total(nueva_batata, nuevo_membrillo, PRECIO_DOCENA, PRECIO_MEDIA))
+                        
+                        # Variables logísticas
+                        mod_actual = df_pedidos_edicion.iloc[idx]["modalidad_entrega"]
+                        dir_actual = df_pedidos_edicion.iloc[idx]["direccion_envio"]
+                        nueva_mod = cambios.get("modalidad_entrega", mod_actual)
+                        nueva_dir = cambios.get("direccion_envio", dir_actual)
+
+                        # Auto-Geocodificación si pasamos a envío a domicilio o cambiamos la calle
+                        if nueva_mod == "Envio_Domicilio" and ("modalidad_entrega" in cambios or "direccion_envio" in cambios):
+                            if pd.notna(nueva_dir) and str(nueva_dir).strip() and str(nueva_dir).strip() != "None":
+                                lat, lon = obtener_coordenadas(nueva_dir)
+                                cambios["latitud"] = lat
+                                cambios["longitud"] = lon
+                            else:
+                                cambios["latitud"] = None
+                                cambios["longitud"] = None
                         
                         supabase.table("pedidos").update(cambios).eq("id", pedido_id).execute()
 
@@ -315,7 +335,7 @@ with tab1:
                 st.rerun()
             except Exception as e:
                 st.error(f"Error de ejecución SQL: {e}")
-        
+                
         # --- EXPORTACIÓN AL EXCEL ---
         st.divider()
         df_excel = df_pedidos.copy()
