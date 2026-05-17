@@ -216,7 +216,9 @@ with tab2:
 # --- PESTAÑA 3: REPARTO ---
 with tab3:
     st.header("🚚 Logística")
-    if "ver_mapa" not in st.session_state: st.session_state.ver_mapa = False
+    # Inicializamos variables de estado para no perder créditos
+    if "datos_ruta_cache" not in st.session_state: st.session_state.datos_ruta_cache = None
+    if "ids_en_ruta" not in st.session_state: st.session_state.ids_en_ruta = []
 
     if pedidos_req.data:
         envios = df[df['modalidad_entrega'] == "Envio_Domicilio"].copy()
@@ -242,79 +244,79 @@ with tab3:
                         lat, lon = obtener_coordenadas(m["direccion_envio"])
                         m.update({"latitud": lat, "longitud": lon})
                     supabase.table("pedidos").update(m).eq("id", rid).execute()
+                # Al actualizar datos, forzamos que se tenga que volver a generar la ruta
+                st.session_state.datos_ruta_cache = None 
                 st.rerun()
 
-            if col_l2.button("🗺️ Generar Ruta Óptima"):
-                st.session_state.ver_mapa = True
-
-            if st.session_state.ver_mapa:
-                # 1. Obtener puntos seleccionados con coordenadas
+            # BOTÓN INTELIGENTE: Solo gasta API si es necesario
+            if col_l2.button("🗺️ Generar/Ver Ruta Óptima"):
                 ready_ids = res_log[res_log['Incluir'] == True]['id'].tolist()
-                ready_coords = df_log[(df_log['id'].isin(ready_ids)) & (df_log['latitud'].notnull())]
                 
-                if len(ready_coords) >= 1:
-                    # Punto de origen (Local)
-                    origen = [-55.1089, -27.4766] 
-                    
-                    m = folium.Map(location=[origen[1], origen[0]], zoom_start=13)
-                    folium.Marker([origen[1], origen[0]], popup="INICIO", icon=folium.Icon(color="green", icon="home")).add_to(m)
-                    
-                    # 2. Llamada a la API de Optimización de OpenRouteService
-                    coords_list = [[origen[0], origen[1]]] + [[row['longitud'], row['latitud']] for _, row in ready_coords.iterrows()]
-                    
-                    body = {
-                        "vehicles": [{"id": 1, "profile": "driving-car", "start": [origen[0], origen[1]], "end": [origen[0], origen[1]]}],
-                        "jobs": [{"id": i, "location": [row['longitud'], row['latitud']]} for i, (_, row) in enumerate(ready_coords.iterrows())]
-                    }
-                    headers = {"Authorization": st.secrets["ORS_API_KEY"], "Content-Type": "application/json"}
-                    
-                    with st.spinner("Calculando ruta..."):
-                        res_route = requests.post("https://api.openrouteservice.org/optimization", json=body, headers=headers)
-                    
-                    if res_route.status_code == 200:
-                        data = res_route.json()
+                # ¿Cambiaron los pedidos o es la primera vez?
+                if st.session_state.datos_ruta_cache is None or ready_ids != st.session_state.ids_en_ruta:
+                    with st.spinner("Calculando ruta real por calles (gastando 1 crédito API)..."):
+                        ready_coords = df_log[(df_log['id'].isin(ready_ids)) & (df_log['latitud'].notnull())]
                         
-                        # --- ESTA ES LA PARTE QUE GENERA EL TRAZO ---
-                        ruta_para_dibujar = []
-                        # Agregamos el local como punto de inicio de la línea
-                        ruta_para_dibujar.append([origen[1], origen[0]]) 
+                        if len(ready_coords) >= 1:
+                            origen = [-55.1089, -27.4766] # [LON, LAT]
+                            
+                            # 1. Optimización (VRP)
+                            body_vrp = {
+                                "vehicles": [{"id": 1, "profile": "driving-car", "start": origen, "end": origen}],
+                                "jobs": [{"id": i, "location": [row['longitud'], row['latitud']]} for i, (_, row) in enumerate(ready_coords.iterrows())]
+                            }
+                            headers = {"Authorization": st.secrets["ORS_API_KEY"], "Content-Type": "application/json"}
+                            res_vrp = requests.post("https://api.openrouteservice.org/optimization", json=body_vrp, headers=headers)
+                            
+                            if res_vrp.status_code == 200:
+                                data_vrp = res_vrp.json()
+                                orden_coords = [origen]
+                                info_clientes = [] # Guardamos nombres para los marcadores
 
-                        for step in data['routes'][0]['steps']:
-                            # Extraemos la ubicación de cada parada en el orden que dio la API
-                            lon_step, lat_step = step['location']
-                            ruta_para_dibujar.append([lat_step, lon_step]) # Folium usa [lat, lon]
+                                for step in data_vrp['routes'][0]['steps']:
+                                    lon_s, lat_s = step['location']
+                                    orden_coords.append([lon_s, lat_s])
+                                    if step['type'] == 'job':
+                                        c_n = ready_coords.iloc[step['job']]['cliente_nombre']
+                                        info_clientes.append({"lat": lat_s, "lon": lon_s, "nombre": c_n})
 
-                            if step['type'] == 'job':
-                                job_id = step['job']
-                                cliente_n = ready_coords.iloc[job_id]['cliente_nombre']
-                                # Ponemos el marcador rojo
-                                folium.Marker(
-                                    [lat_step, lon_step], 
-                                    popup=f"{cliente_n}", 
-                                    icon=folium.Icon(color="red", icon="info-sign")
-                                ).add_to(m)
+                                # 2. Directions (Calles reales)
+                                body_dir = {"coordinates": orden_coords}
+                                res_dir = requests.post("https://api.openrouteservice.org/v2/directions/driving-car/geojson", json=body_dir, headers=headers)
+                                
+                                if res_dir.status_code == 200:
+                                    # Guardamos TODO en el cache
+                                    st.session_state.datos_ruta_cache = {
+                                        "geojson": res_dir.json(),
+                                        "clientes": info_clientes,
+                                        "origen": [origen[1], origen[0]]
+                                    }
+                                    st.session_state.ids_en_ruta = ready_ids
+                                else:
+                                    st.error("Error en la geometría de calles.")
+                            else:
+                                st.error("Error en el optimizador. Verificá tu API Key.")
+                        else:
+                            st.warning("Seleccioná pedidos con direcciones válidas.")
 
-                        # Dibujamos la línea azul que conecta todos los puntos
-                        folium.PolyLine(
-                            ruta_para_dibujar, 
-                            color="blue", 
-                            weight=3, 
-                            opacity=0.8,
-                            tooltip="Trayecto Óptimo"
-                        ).add_to(m)
-                        
-                        st.success("Ruta y trayectoria generadas con éxito.")
-                        st_folium(m, width=800, height=500)
-                    else:
-                        # Si la API falla, mostramos al menos los puntos rojos sueltos
-                        for _, row in ready_coords.iterrows():
-                            folium.Marker([row['latitud'], row['longitud']], popup=row['cliente_nombre'], icon=folium.Icon(color="red")).add_to(m)
-                        st_folium(m, width=800, height=500)
-                        st.warning("No se pudo trazar la línea de ruta (Verificá tu API Key), pero se muestran los puntos de entrega.")
-                else:
-                    st.warning("Seleccioná al menos un pedido con dirección válida.")
+            # DIBUJO DEL MAPA DESDE EL CACHE (No gasta créditos)
+            if st.session_state.datos_ruta_cache:
+                cache = st.session_state.datos_ruta_cache
+                m = folium.Map(location=cache["origen"], zoom_start=14)
+                folium.Marker(cache["origen"], popup="LOCAL", icon=folium.Icon(color="green", icon="home")).add_to(m)
+                
+                # Dibujamos marcadores de clientes guardados
+                for c in cache["clientes"]:
+                    folium.Marker([c["lat"], c["lon"]], popup=f"Cliente: {c['nombre']}", icon=folium.Icon(color="red")).add_to(m)
+                
+                # Dibujamos la línea de la calle guardada
+                folium.GeoJson(cache["geojson"], name="Ruta Real", 
+                               style_function=lambda x: {'color': 'blue', 'weight': 5, 'opacity': 0.7}).add_to(m)
+                
+                st_folium(m, width=800, height=500, key="mapa_reparto")
+                st.info("💡 Estás viendo una ruta guardada. Si agregas pedidos o cambias el filtro, pulsa el botón de nuevo.")
         else:
-            st.info("No hay pedidos con envío.")
+            st.info("No hay pedidos con envío a domicilio.")
             
 # --- PESTAÑA 4: CONFIGURACIÓN ---
 with tab4:
