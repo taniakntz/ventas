@@ -281,11 +281,11 @@ with tab1:
             },
             num_rows="dynamic",
             hide_index=True,
-            key="editor_pedidos_tabla"
+            key="editor_pedidos_v2" # <-- ESTE ES EL CAMBIO (Rompe la caché anterior)
         )
         
         if st.button("💾 Guardar Cambios en Pedidos"):
-            estado_pedidos = st.session_state["editor_pedidos_tabla"]
+            estado_pedidos = st.session_state["editor_pedidos_v2"] # <-- ESTE ES EL CAMBIO
             try:
                 if estado_pedidos["edited_rows"]:
                     for idx_str, cambios in estado_pedidos["edited_rows"].items():
