@@ -451,54 +451,73 @@ with tab3:
     st.header("🚚 Logística y Envíos")
     if pedidos_req.data:
         df_rutas = pd.DataFrame(pedidos_req.data)
-        envios = df_rutas[(df_rutas['modalidad_entrega'] == 'Envio_Domicilio') & (df_rutas['latitud'].notnull())]
+        # Filtramos todos los envíos a domicilio, tengan o no coordenadas
+        envios_totales = df_rutas[df_rutas['modalidad_entrega'] == 'Envio_Domicilio']
         
-        if not envios.empty:
-            rango_seleccionado = st.selectbox("Filtrar por Rango Horario", envios['rango_horario'].unique())
-            pedidos_rango = envios[envios['rango_horario'] == rango_seleccionado].copy()
+        if not envios_totales.empty:
             
-            st.subheader("Borrador de Ruta")
-            pedidos_rango["Incluir"] = True
-            editado = st.data_editor(pedidos_rango[["cliente_nombre", "direccion_envio", "Incluir"]], hide_index=True)
+            # Sistema de Alerta: Detectar pedidos pasados a envío pero que carecen de dirección
+            sin_coord = envios_totales[envios_totales['latitud'].isnull()]
+            if not sin_coord.empty:
+                st.warning(f"⚠️ Atención: Hay {len(sin_coord)} pedido(s) asignados como 'Envío a Domicilio' que no tienen una dirección o coordenadas válidas. Debes completar su dirección en la Pestaña de Pedidos para que aparezcan en la ruta.")
             
-            if st.button("🗺️ Generar Ruta Óptima (VRP)"):
-                pedidos_confirmados = pedidos_rango[editado["Incluir"] == True]
-                if len(pedidos_confirmados) < 2:
-                    st.warning("Se necesitan al menos 2 puntos para generar una ruta.")
+            # Solo pasamos al mapa los que sí tienen coordenadas
+            envios = envios_totales[envios_totales['latitud'].notnull()]
+            
+            if not envios.empty:
+                # Implementación del Filtro "Todos"
+                opciones_rango = ["Todos"] + list(envios['rango_horario'].dropna().unique())
+                rango_seleccionado = st.selectbox("Filtrar por Rango Horario", opciones_rango)
+                
+                if rango_seleccionado == "Todos":
+                    pedidos_rango = envios.copy()
                 else:
-                    with st.spinner("Calculando ruta óptima con OpenRouteService..."):
-                        coordenadas = [[float(row['longitud']), float(row['latitud'])] for _, row in pedidos_confirmados.iterrows()]
-                        origen = [-55.108986,-27.476643] 
-                        jobs = [{"id": i, "location": coord} for i, coord in enumerate(coordenadas)]
-                        
-                        body = {
-                            "vehicles": [{"id": 1, "profile": "driving-car", "start": origen, "end": origen}],
-                            "jobs": jobs
-                        }
-                        headers = {"Authorization": st.secrets["ORS_API_KEY"], "Content-Type": "application/json"}
-                        res = requests.post("https://api.openrouteservice.org/optimization", json=body, headers=headers)
-                        
-                        if res.status_code == 200:
-                            st.success("Ruta generada.")
-                            data = res.json()
-                            m = folium.Map(location=[origen[1], origen[0]], zoom_start=13)
-                            folium.Marker([origen[1], origen[0]], popup="LOCAL", icon=folium.Icon(color="red")).add_to(m)
+                    pedidos_rango = envios[envios['rango_horario'] == rango_seleccionado].copy()
+                
+                st.subheader("Borrador de Ruta")
+                pedidos_rango["Incluir"] = True
+                
+                # Mostramos también el rango en la tablita para que sepas de cuándo es cada uno si eliges "Todos"
+                editado = st.data_editor(pedidos_rango[["cliente_nombre", "direccion_envio", "rango_horario", "Incluir"]], hide_index=True)
+                
+                if st.button("🗺️ Generar Ruta Óptima (VRP)"):
+                    pedidos_confirmados = pedidos_rango[editado["Incluir"] == True]
+                    if len(pedidos_confirmados) < 2:
+                        st.warning("Se necesitan al menos 2 puntos para generar una ruta.")
+                    else:
+                        with st.spinner("Calculando ruta óptima con OpenRouteService..."):
+                            coordenadas = [[float(row['longitud']), float(row['latitud'])] for _, row in pedidos_confirmados.iterrows()]
+                            origen = [-55.108986,-27.476643] 
+                            jobs = [{"id": i, "location": coord} for i, coord in enumerate(coordenadas)]
                             
-                            for step in data['routes'][0]['steps']:
-                                if step['type'] == 'job':
-                                    loc = step['location']
-                                    job_id = step['job']
-                                    cliente_r = pedidos_confirmados.iloc[job_id]['cliente_nombre']
-                                    folium.Marker([loc[1], loc[0]], popup=f"Entrega: {cliente_r}").add_to(m)
+                            body = {
+                                "vehicles": [{"id": 1, "profile": "driving-car", "start": origen, "end": origen}],
+                                "jobs": jobs
+                            }
+                            headers = {"Authorization": st.secrets["ORS_API_KEY"], "Content-Type": "application/json"}
+                            res = requests.post("https://api.openrouteservice.org/optimization", json=body, headers=headers)
                             
-                            st_folium(m, width=700, height=500)
-                        else:
-                            st.error(f"Error en la API de Rutas: {res.text}")
+                            if res.status_code == 200:
+                                st.success("Ruta generada.")
+                                data = res.json()
+                                m = folium.Map(location=[origen[1], origen[0]], zoom_start=13)
+                                folium.Marker([origen[1], origen[0]], popup="LOCAL", icon=folium.Icon(color="red")).add_to(m)
+                                
+                                for step in data['routes'][0]['steps']:
+                                    if step['type'] == 'job':
+                                        loc = step['location']
+                                        job_id = step['job']
+                                        cliente_r = pedidos_confirmados.iloc[job_id]['cliente_nombre']
+                                        folium.Marker([loc[1], loc[0]], popup=f"Entrega: {cliente_r}").add_to(m)
+                                
+                                st_folium(m, width=700, height=500)
+                            else:
+                                st.error(f"Error en la API de Rutas: {res.text}")
+            else:
+                st.info("No hay pedidos con envío a domicilio que cuenten con coordenadas válidas listos para rutear.")
         else:
-            st.info("No hay pedidos con envío a domicilio con coordenadas válidas.")
-    else:
-        st.info("Aún no hay pedidos en esta campaña.")
-
+            st.info("No hay pedidos con envío a domicilio en esta campaña.")
+            
 # --- PESTAÑA 4: CONFIGURACIÓN ---
 with tab4:
     st.header("⚙️ Gestión de Campañas")
