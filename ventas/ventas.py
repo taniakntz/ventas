@@ -79,7 +79,7 @@ def calcular_total(batata, membrillo, precio_doc, precio_med):
         elif cantidad == 0.75: total += precio_med + (precio_med / 2)
         elif cantidad >= 1:
             total += int(cantidad) * precio_doc
-            resto = quantity % 1 if 'quantity' in locals() else cantidad % 1
+            resto = cantidad % 1
             if resto == 0.5: total += precio_med
             elif resto == 0.25: total += precio_med / 2
             elif resto == 0.75: total += precio_med + (precio_med / 2)
@@ -260,15 +260,13 @@ with tab1:
         # --- VISTA DETALLADA POR CLIENTE Y EDICIÓN ---
         st.subheader("📋 Gestión de Pedidos")
         
-        # 1. Definición estricta de columnas requeridas
         columnas_base = ["id", "cliente_nombre", "docenas_batata", "docenas_membrillo", "estado_pago", "modalidad_entrega", "direccion_envio", "rango_horario", "total_calculado"]
         
-        # 2. Inyección forzada de columnas para evitar KeyError por omisión de Supabase
+        # Control estricto de estructura
         for col in columnas_base:
             if col not in df_pedidos.columns:
                 df_pedidos[col] = None
                 
-        # 3. Creación del DataFrame de edición seguro
         df_pedidos_edicion = df_pedidos[columnas_base].copy()
         df_pedidos_edicion["total_calculado"] = pd.to_numeric(df_pedidos_edicion["total_calculado"], errors="coerce").fillna(0)
         
@@ -289,18 +287,17 @@ with tab1:
             },
             num_rows="dynamic",
             hide_index=True,
-            key="editor_pedidos_v3" # <-- CLAVE ROTADA A V3 PARA DESTRUIR LA MEMORIA CORRUPTA
+            key="editor_pedidos_v3"
         )
         
         if st.button("💾 Guardar Cambios en Pedidos"):
-            estado_pedidos = st.session_state["editor_pedidos_v3"] # <-- DEBE LEER LA CLAVE V3
+            estado_pedidos = st.session_state["editor_pedidos_v3"]
             try:
                 if estado_pedidos["edited_rows"]:
                     for idx_str, cambios in estado_pedidos["edited_rows"].items():
                         idx = int(idx_str)
                         pedido_id = df_pedidos_edicion.iloc[idx]["id"]
                         
-                        # --- REGLAS FINANCIERAS ---
                         batata_actual = float(df_pedidos_edicion.iloc[idx]["docenas_batata"])
                         membrillo_actual = float(df_pedidos_edicion.iloc[idx]["docenas_membrillo"])
                         nueva_batata = float(cambios.get("docenas_batata", batata_actual))
@@ -309,12 +306,10 @@ with tab1:
                         if "docenas_batata" in cambios or "docenas_membrillo" in cambios:
                             cambios["total_calculado"] = float(calcular_total(nueva_batata, nuevo_membrillo, PRECIO_DOCENA, PRECIO_MEDIA))
                         
-                        # --- REGLAS LOGÍSTICAS DE SANITIZACIÓN ESTRICTA ---
                         mod_actual = df_pedidos_edicion.iloc[idx]["modalidad_entrega"]
                         nueva_mod = cambios.get("modalidad_entrega", mod_actual)
 
                         if nueva_mod == "Retiro_Local":
-                            # Forzar eliminación de datos de envío si se cambia la modalidad a retiro
                             cambios["direccion_envio"] = None
                             cambios["rango_horario"] = None
                             cambios["latitud"] = None
@@ -333,6 +328,16 @@ with tab1:
                                     cambios["longitud"] = None
                         
                         supabase.table("pedidos").update(cambios).eq("id", pedido_id).execute()
+
+                if estado_pedidos["deleted_rows"]:
+                    for idx in estado_pedidos["deleted_rows"]:
+                        pedido_id = df_pedidos_edicion.iloc[idx]["id"]
+                        supabase.table("pedidos").delete().eq("id", pedido_id).execute()
+
+                st.success("Actualización consolidada en la base de datos.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error de ejecución SQL: {e}")
                 
         # --- EXPORTACIÓN AL EXCEL ---
         st.divider()
