@@ -261,6 +261,12 @@ with tab1:
         st.subheader("📋 Gestión de Pedidos")
         
         columnas_base = ["id", "cliente_nombre", "docenas_batata", "docenas_membrillo", "estado_pago", "modalidad_entrega", "direccion_envio", "rango_horario", "total_calculado"]
+        
+        # Control de integridad: Forzar la existencia de columnas omitidas por Supabase
+        for col in columnas_base:
+            if col not in df_pedidos.columns:
+                df_pedidos[col] = None
+                
         df_pedidos_edicion = df_pedidos[columnas_base].copy()
         df_pedidos_edicion["total_calculado"] = pd.to_numeric(df_pedidos_edicion["total_calculado"], errors="coerce").fillna(0)
         
