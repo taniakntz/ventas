@@ -260,13 +260,15 @@ with tab1:
         # --- VISTA DETALLADA POR CLIENTE Y EDICIÓN ---
         st.subheader("📋 Gestión de Pedidos")
         
+        # 1. Definición estricta de columnas requeridas
         columnas_base = ["id", "cliente_nombre", "docenas_batata", "docenas_membrillo", "estado_pago", "modalidad_entrega", "direccion_envio", "rango_horario", "total_calculado"]
         
-        # Control de integridad: Forzar la existencia de columnas omitidas por Supabase
+        # 2. Inyección forzada de columnas para evitar KeyError por omisión de Supabase
         for col in columnas_base:
             if col not in df_pedidos.columns:
                 df_pedidos[col] = None
                 
+        # 3. Creación del DataFrame de edición seguro
         df_pedidos_edicion = df_pedidos[columnas_base].copy()
         df_pedidos_edicion["total_calculado"] = pd.to_numeric(df_pedidos_edicion["total_calculado"], errors="coerce").fillna(0)
         
@@ -287,11 +289,11 @@ with tab1:
             },
             num_rows="dynamic",
             hide_index=True,
-            key="editor_pedidos_v2" # <-- ESTE ES EL CAMBIO (Rompe la caché anterior)
+            key="editor_pedidos_v3" # <-- CLAVE ROTADA A V3 PARA DESTRUIR LA MEMORIA CORRUPTA
         )
         
         if st.button("💾 Guardar Cambios en Pedidos"):
-            estado_pedidos = st.session_state["editor_pedidos_v2"] # <-- ESTE ES EL CAMBIO
+            estado_pedidos = st.session_state["editor_pedidos_v3"] # <-- DEBE LEER LA CLAVE V3
             try:
                 if estado_pedidos["edited_rows"]:
                     for idx_str, cambios in estado_pedidos["edited_rows"].items():
@@ -331,16 +333,6 @@ with tab1:
                                     cambios["longitud"] = None
                         
                         supabase.table("pedidos").update(cambios).eq("id", pedido_id).execute()
-
-                if estado_pedidos["deleted_rows"]:
-                    for idx in estado_pedidos["deleted_rows"]:
-                        pedido_id = df_pedidos_edicion.iloc[idx]["id"]
-                        supabase.table("pedidos").delete().eq("id", pedido_id).execute()
-
-                st.success("Actualización consolidada en la base de datos.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error de ejecución SQL: {e}")
                 
         # --- EXPORTACIÓN AL EXCEL ---
         st.divider()
