@@ -145,10 +145,11 @@ with tab1:
         c3.metric("Total", decimal_a_fraccion(b_t + m_t))
 
         st.subheader("📋 Gestión de Pedidos")
-        df_ed = df[["id", "cliente_nombre", "docenas_batata", "docenas_membrillo", "estado_pago", "modalidad_entrega", "total_calculado"]].copy()
+        df_ed = df[["id", "cliente_nombre", "docenas_batata", "docenas_membrillo", "estado_pago", "metodo_pago", "modalidad_entrega", "total_calculado"]].copy()
         
         # Limpieza de nulos para evitar casilleros en blanco en los selectores
         df_ed["estado_pago"] = df_ed["estado_pago"].replace([None, "", "nan"], "Pendiente")
+        df_ed["metodo_pago"] = df_ed["metodo_pago"].replace([None, "", "nan"], "N/A")
         df_ed["modalidad_entrega"] = df_ed["modalidad_entrega"].replace([None, "", "nan"], "Retiro_Local")
         df_ed["total_calculado"] = pd.to_numeric(df_ed["total_calculado"]).fillna(0)
         
@@ -158,6 +159,7 @@ with tab1:
                 "id": None, 
                 "total_calculado": st.column_config.NumberColumn("Total ($)", disabled=True),
                 "modalidad_entrega": st.column_config.SelectboxColumn("Entrega", options=["Retiro_Local", "Envio_Domicilio"], required=True),
+                "estado_pago": st.column_config.SelectboxColumn("Pago", options=["Pendiente", "Pagado"], required=True),
                 "estado_pago": st.column_config.SelectboxColumn("Pago", options=["Pendiente", "Pagado"], required=True)
             }, 
             num_rows="dynamic", hide_index=True, key="p_v_final_strict"
