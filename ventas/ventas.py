@@ -98,16 +98,18 @@ tab1, tab2, tab3, tab4 = st.tabs(["📦 Pedidos", "📈 Finanzas", "🚚 Reparto
 # --- PESTAÑA 1: PEDIDOS ---
 with tab1:
     st.header("📝 Nuevo Pedido")
-    
+
+    try:
     # Widgets reactivos para ingreso
     c_nom = st.text_input("Nombre del Cliente", key="in_nom")
     col1, col2 = st.columns(2)
     with col1: c_bat = st.number_input("Docenas Batata", 0.0, step=0.25, key="in_bat")
     with col2: c_mem = st.number_input("Docenas Membrillo", 0.0, step=0.25, key="in_mem")
     
-    col3, col4 = st.columns(2)
+    col3, col4, col5 = st.columns(3)
     with col3: c_mod = st.selectbox("Entrega", ["Retiro_Local", "Envio_Domicilio"], key="in_mod")
     with col4: c_pag = st.selectbox("Estado de Pago", ["Pendiente", "Pagado"], key="in_pag")
+    with col5: c_met = st.selectbox("Método de Pago", ["N/A", "Efectivo", "MP"], key="in_met")
     
     c_dir, c_ran = None, None
     if c_mod == "Envio_Domicilio":
@@ -202,7 +204,12 @@ with tab1:
                     st.rerun()
     else:
         st.info("No hay pedidos registrados en esta campaña.")
-        
+
+    except Exception as e:
+        # Mostramos el error solo en esta sección
+        st.error(f"Error en Pedidos: {e}")
+        st.info("Podés seguir usando las otras pestañas normalmente.")
+
 # --- PESTAÑA 2: FINANZAS ---
 with tab2:
     st.header("📈 Balance")
