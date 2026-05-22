@@ -107,33 +107,30 @@ def obtener_coordenadas(direccion):
         "q": texto,
         "limit": 5
     }
+    
+    # CABECERA OBLIGATORIA ANTIBLOQUEO
+    headers = {
+        'User-Agent': 'PastelitosApp_Obera/1.0 (contacto: admin@obera.com)'
+    }
 
     try:
 
         res = requests.get(
             url,
             params=params,
+            headers=headers,
             timeout=15
         )
 
         if res.status_code != 200:
-
-            st.error(
-                f"Photon HTTP {res.status_code}"
-            )
-
+            st.error(f"Photon HTTP {res.status_code}")
             return None, None
 
         data = res.json()
-
         features = data.get("features", [])
 
         if not features:
-
-            st.warning(
-                f"No se encontró: {texto}"
-            )
-
+            st.warning(f"No se encontró: {texto}")
             return None, None
 
         # =====================================
@@ -143,10 +140,8 @@ def obtener_coordenadas(direccion):
         for f in features:
 
             coords = f["geometry"]["coordinates"]
-
             lon = coords[0]
             lat = coords[1]
-
             props = f.get("properties", {})
 
             ciudad = (
@@ -157,31 +152,17 @@ def obtener_coordenadas(direccion):
 
             ciudad_norm = normalizar_texto(ciudad)
 
-            # DEBUG
-            st.write(
-                "CANDIDATO:",
-                props.get("name", ""),
-                lat,
-                lon
-            )
-
             # VALIDAR OBERÁ
             if "obera" in ciudad_norm:
-
                 return lat, lon
 
-        st.warning(
-            f"No hubo resultados válidos en Oberá para: {texto}"
-        )
-
+        st.warning(f"No hubo resultados válidos en Oberá para: {texto}")
         return None, None
 
     except Exception as e:
-
         st.error(f"ERROR GEOCODING: {e}")
-
         return None, None
-
+        
 def exportar_excel(dataframe):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
