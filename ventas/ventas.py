@@ -359,11 +359,9 @@ with tab2:
 
 # --- PESTAÑA 3: REPARTO ---
 with tab3:
-
     st.header("🚚 Logística")
 
     try:
-
         if "datos_ruta_cache" not in st.session_state:
             st.session_state.datos_ruta_cache = None
 
@@ -371,73 +369,30 @@ with tab3:
             st.session_state.ids_en_ruta = []
 
         if pedidos_req.data:
-
-            envios = df[
-                df['modalidad_entrega'] == "Envio_Domicilio"
-            ].copy()
+            envios = df[df['modalidad_entrega'] == "Envio_Domicilio"].copy()
 
             if not envios.empty:
-
                 filt = st.selectbox(
                     "Filtro Horario",
-                    ["Todos"] + sorted(
-                        list(envios['rango_horario'].dropna().unique())
-                    )
+                    ["Todos"] + sorted(list(envios['rango_horario'].dropna().unique()))
                 )
 
-                df_log = (
-                    envios
-                    if filt == "Todos"
-                    else envios[
-                        envios['rango_horario'] == filt
-                    ]
-                )
-
+                df_log = envios if filt == "Todos" else envios[envios['rango_horario'] == filt]
                 df_log["Incluir"] = True
 
                 st.subheader("📍 Datos de Envío")
 
                 res_log = st.data_editor(
-
-                    df_log[
-                        [
-                            "id",
-                            "cliente_nombre",
-                            "direccion_envio",
-                            "rango_horario",
-                            "Incluir"
-                        ]
-                    ],
-
+                    df_log[["id", "cliente_nombre", "direccion_envio", "rango_horario", "Incluir"]],
                     column_config={
-
                         "id": None,
-
-                        "cliente_nombre":
-                            st.column_config.TextColumn(
-                                "Cliente",
-                                disabled=True
-                            ),
-
-                        "Incluir":
-                            st.column_config.CheckboxColumn(
-                                "Incluir",
-                                default=True
-                            ),
-
-                        "rango_horario":
-                            st.column_config.SelectboxColumn(
-                                "Horario",
-                                options=[
-                                    "08:00-09:00",
-                                    "09:00-10:00",
-                                    "10:00-11:00",
-                                    "11:00-12:00",
-                                    "12:00-13:00"
-                                ]
-                            )
+                        "cliente_nombre": st.column_config.TextColumn("Cliente", disabled=True),
+                        "Incluir": st.column_config.CheckboxColumn("Incluir", default=True),
+                        "rango_horario": st.column_config.SelectboxColumn(
+                            "Horario",
+                            options=["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"]
+                        )
                     },
-
                     hide_index=True,
                     key="log_vfinal"
                 )
@@ -447,17 +402,11 @@ with tab3:
                 # =====================================
                 # ACTUALIZAR LOGISTICA
                 # =====================================
-
                 if col_l1.button("📍 Actualizar Logística"):
-
                     hubo_cambios = False
-
                     for idx, row in res_log.iterrows():
-
                         rid = row["id"]
-
                         direccion = row["direccion_envio"]
-
                         rango = row["rango_horario"]
 
                         datos_update = {
@@ -465,287 +414,120 @@ with tab3:
                             "rango_horario": rango
                         }
 
-                        # =====================================
-                        # GEOCODING
-                        # =====================================
-
                         if direccion:
-
-                            lat, lon = obtener_coordenadas(
-                                direccion
-                            )
+                            lat, lon = obtener_coordenadas(direccion)
                             
-                            st.write("LAT:", lat)
-                            st.write("LON:", lon)
-                            
-                            if (
-                                lat is not None
-                                and
-                                lon is not None
-                            ):
-
+                            if lat is not None and lon is not None:
                                 datos_update.update({
                                     "latitud": lat,
                                     "longitud": lon
                                 })
-
-                                st.success(
-                                    f"""
-                                    ✅ Coordenadas encontradas para:
-
-                                    {direccion}
-                                    """
-                                )
-
+                                st.success(f"✅ Coordenadas encontradas para: {direccion}")
                             else:
+                                st.warning(f"⚠️ No se pudo localizar: {direccion}")
 
-                                st.warning(
-                                    f"""
-                                    ⚠️ No se pudo localizar:
-
-                                    {direccion}
-                                    """
-                                )
-
-                        # =====================================
-                        # LIMPIAR NaN PARA SUPABASE
-                        # =====================================
+                        # Limpieza estricta de NaN
+                        datos_update = {k: (None if pd.isna(v) else v) for k, v in datos_update.items()}
                         
-                        datos_update = {
-                            k: (
-                                None
-                                if pd.isna(v)
-                                else v
-                            )
-                            for k, v in datos_update.items()
-                        }
-                        
-                        st.write("UPDATE:", datos_update)
-                        
-                        response = supabase.table("pedidos") \
-                            .update(datos_update) \
-                            .eq("id", rid) \
-                            .execute()
-                        
-                        st.write("RESPUESTA SUPABASE:", response)
-                        
-                        st.success(f"UPDATE OK ID {rid}")
-
+                        response = supabase.table("pedidos").update(datos_update).eq("id", rid).execute()
                         hubo_cambios = True
-
-                        time.sleep(1)
+                        time.sleep(1) # Límite para no saturar Photon
 
                     if hubo_cambios:
-
                         st.session_state.datos_ruta_cache = None
-
-                        st.success(
-                            "✅ Logística actualizada"
-                        )
-
+                        st.success("✅ Logística actualizada")
                         st.rerun()
 
                 # =====================================
-                # ACA SIGUE EL BOTON DE RUTA
+                # GENERAR RUTA OPTIMA
                 # =====================================
+                if col_l2.button("🗺️ Generar/Ver Ruta Óptima"):
+                    try:
+                        pedidos_ruta = []
+                        for _, row in res_log.iterrows():
+                            if row["Incluir"]:
+                                pedido_db = next((p for p in pedidos_req.data if p["id"] == row["id"]), None)
+                                if pedido_db and pedido_db.get("latitud") is not None and pedido_db.get("longitud") is not None:
+                                    pedidos_ruta.append({
+                                        "id": pedido_db["id"],
+                                        "nombre": pedido_db["cliente_nombre"],
+                                        "lat": float(pedido_db["latitud"]),
+                                        "lon": float(pedido_db["longitud"])
+                                    })
 
+                        if not pedidos_ruta:
+                            st.warning("No hay pedidos con coordenadas válidas.")
+                        else:
+                            ORIGEN_LAT = -27.4872
+                            ORIGEN_LON = -55.1194
+
+                            coords_ors = [[ORIGEN_LON, ORIGEN_LAT]]
+                            for p in pedidos_ruta:
+                                coords_ors.append([p["lon"], p["lat"]])
+
+                            url_dir = "https://api.openrouteservice.org/v2/directions/driving-car/geojson"
+                            headers = {
+                                "Authorization": st.secrets["ORS_API_KEY"],
+                                "Content-Type": "application/json"
+                            }
+                            
+                            body_dir = {
+                                "coordinates": coords_ors,
+                                "radiuses": [1500] * len(coords_ors) # Expande radio de búsqueda de ORS
+                            }
+
+                            res_dir = requests.post(url_dir, json=body_dir, headers=headers, timeout=30)
+
+                            if res_dir.status_code == 200:
+                                geojson = res_dir.json()
+                                
+                                # GUARDADO ESTRUCTURAL CORRECTO (Datos, no el objeto)
+                                st.session_state.datos_ruta_cache = {
+                                    "origen": [ORIGEN_LAT, ORIGEN_LON],
+                                    "clientes": pedidos_ruta,
+                                    "geojson": geojson
+                                }
+                                st.success("✅ Ruta generada correctamente")
+                                st.rerun()
+                            else:
+                                st.error(f"❌ Error al generar ruta. HTTP: {res_dir.status_code}\n{res_dir.text}")
+
+                    except Exception as e:
+                        st.error(f"Error generando ruta: {e}")
+
+                # =====================================
+                # RENDERIZADO DEL MAPA 
+                # =====================================
                 if st.session_state.datos_ruta_cache:
-
                     cache = st.session_state.datos_ruta_cache
-
-                    m = folium.Map(
-                        location=cache["origen"],
-                        zoom_start=14
-                    )
-
+                    m = folium.Map(location=cache["origen"], zoom_start=14)
+                    
                     folium.Marker(
-                        cache["origen"],
-                        popup="LOCAL",
-                        icon=folium.Icon(
-                            color="green",
-                            icon="home"
-                        )
+                        cache["origen"], 
+                        popup="LOCAL", 
+                        icon=folium.Icon(color="green", icon="home")
                     ).add_to(m)
 
                     for c in cache["clientes"]:
-
                         folium.Marker(
-                            [c["lat"], c["lon"]],
-                            popup=f"Cliente: {c['nombre']}",
+                            [c["lat"], c["lon"]], 
+                            popup=f"Cliente: {c['nombre']}", 
                             icon=folium.Icon(color="red")
                         ).add_to(m)
 
                     folium.GeoJson(
                         cache["geojson"],
-                        style_function=lambda x: {
-                            'color': 'blue',
-                            'weight': 5,
-                            'opacity': 0.7
-                        }
+                        style_function=lambda x: {"color": "blue", "weight": 5, "opacity": 0.8}
                     ).add_to(m)
 
-                    st_folium(
-                        m,
-                        width=800,
-                        height=500,
-                        key="mapa_reparto"
-                    )
+                    st_folium(m, width=800, height=500, key="mapa_reparto")
 
             else:
+                st.info("No hay pedidos con envío a domicilio.")
 
-                st.info(
-                    "No hay pedidos con envío a domicilio."
-                )
-            # =====================================
-            # GENERAR RUTA OPTIMA
-            # =====================================
-            
-            if col_l2.button("🗺️ Generar/Ver Ruta Óptima"):
-            
-                try:
-            
-                    pedidos_ruta = []
-            
-                    for _, row in res_log.iterrows():
-            
-                        if row["Incluir"]:
-            
-                            pedido_db = next(
-                                (
-                                    p for p in pedidos_req.data
-                                    if p["id"] == row["id"]
-                                ),
-                                None
-                            )
-            
-                            if (
-                                pedido_db
-                                and pedido_db.get("latitud") is not None
-                                and pedido_db.get("longitud") is not None
-                            ):
-            
-                                pedidos_ruta.append({
-                                    "id": pedido_db["id"],
-                                    "nombre": pedido_db["cliente_nombre"],
-                                    "lat": float(pedido_db["latitud"]),
-                                    "lon": float(pedido_db["longitud"])
-                                })
-            
-                    if not pedidos_ruta:
-            
-                        st.warning(
-                            "No hay pedidos con coordenadas válidas."
-                        )
-            
-                    else:
-            
-                        ORIGEN_LAT = -27.4872
-                        ORIGEN_LON = -55.1194
-            
-                        coords_ors = [
-                            [ORIGEN_LON, ORIGEN_LAT]
-                        ]
-            
-                        for p in pedidos_ruta:
-            
-                            coords_ors.append([
-                                p["lon"],
-                                p["lat"]
-                            ])
-            
-                        url_dir = (
-                            "https://api.openrouteservice.org/v2/directions/driving-car/geojson"
-                        )
-            
-                        headers = {
-                            "Authorization": st.secrets["ORS_API_KEY"],
-                            "Content-Type": "application/json"
-                        }
-            
-                        body_dir = {
-                            "coordinates": coords_ors,
-                            "radiuses": [1500] * len(coords_ors)
-                        }
-            
-                        res_dir = requests.post(
-                            url_dir,
-                            json=body_dir,
-                            headers=headers,
-                            timeout=30
-                        )
-            
-                        if res_dir.status_code == 200:
-            
-                            geojson = res_dir.json()
-            
-                            m = folium.Map(
-                                location=[
-                                    ORIGEN_LAT,
-                                    ORIGEN_LON
-                                ],
-                                zoom_start=14
-                            )
-            
-                            folium.Marker(
-                                [ORIGEN_LAT, ORIGEN_LON],
-                                popup="LOCAL",
-                                icon=folium.Icon(
-                                    color="green",
-                                    icon="home"
-                                )
-                            ).add_to(m)
-            
-                            for p in pedidos_ruta:
-            
-                                folium.Marker(
-                                    [p["lat"], p["lon"]],
-                                    popup=f"Cliente: {p['nombre']}",
-                                    icon=folium.Icon(
-                                        color="red"
-                                    )
-                                ).add_to(m)
-            
-                            folium.GeoJson(
-                                geojson,
-                                style_function=lambda x: {
-                                    "color": "blue",
-                                    "weight": 5,
-                                    "opacity": 0.8
-                                }
-                            ).add_to(m)
-            
-                            st.session_state.datos_ruta_cache = {
-                                "mapa": m
-                            }
-            
-                            st.success(
-                                "✅ Ruta generada correctamente"
-                            )
-            
-                            st.rerun()
-            
-                        else:
-            
-                            st.error(
-                                f"""
-                                ❌ Error al generar ruta
-            
-                                HTTP: {res_dir.status_code}
-            
-                                {res_dir.text}
-                                """
-                            )
-            
-                except Exception as e:
-            
-                    st.error(f"Error generando ruta: {e}")
-    
     except Exception as e:
-    
         st.error(f"ERROR TAB3: {e}")
-    
         import traceback
-    
         st.code(traceback.format_exc())
                     
 # --- PESTAÑA 4: CONFIGURACIÓN ---
