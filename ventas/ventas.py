@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import requests
+import time
 import re
 from io import BytesIO
 from datetime import date
@@ -71,22 +72,37 @@ def obtener_coordenadas(direccion):
     if "Oberá" not in direccion: direccion = f"{direccion}, Oberá"
     
     dir_exacta = f"{direccion}, Misiones, Argentina"
-    headers = {'User-Agent': 'PastelitosApp/2.0'}
+    # Cambiamos el User-Agent para que la API no lo detecte como un bot genérico
+    headers = {'User-Agent': 'PastelitosApp_Obera/3.0 (tania_admin)'}
+    
+    # 1. RATE PACING: Pausa obligatoria para evitar el bloqueo de IP de Nominatim
+    time.sleep(1.5) 
     
     try:
         # Intento 1: Dirección exacta
         res_1 = requests.get(f"https://nominatim.openstreetmap.org/search?q={dir_exacta}&format=json&limit=1", headers=headers)
+        
+        # Control de bloqueo de IP
+        if res_1.status_code in [403, 429]:
+            st.error(f"🚨 La API de mapas bloqueó temporalmente tu conexión (Error {res_1.status_code}). Esperá un minuto.")
+            return None, None
+            
         if res_1.status_code == 200 and res_1.json():
             return float(res_1.json()[0]['lat']), float(res_1.json()[0]['lon'])
             
         # Intento 2: Fallback (Quita los números para forzar la ubicación de la calle)
+        time.sleep(1.5) # Pausa antes del segundo intento
         dir_sin_numeros = re.sub(r'\d+', '', direccion)
         res_2 = requests.get(f"https://nominatim.openstreetmap.org/search?q={dir_sin_numeros}, Misiones, Argentina&format=json&limit=1", headers=headers)
+        
         if res_2.status_code == 200 and res_2.json():
             return float(res_2.json()[0]['lat']), float(res_2.json()[0]['lon'])
-    except: pass
+            
+    except requests.exceptions.RequestException as e:
+        st.error(f"Fallo crítico de red intentando conectar con la API: {e}")
+        
     return None, None
-
+    
 def exportar_excel(dataframe):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
