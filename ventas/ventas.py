@@ -110,7 +110,9 @@ def obtener_coordenadas(direccion):
         try:
     
             time.sleep(1)
-    
+            
+            st.write("QUERY FINAL:", texto)
+            
             res = requests.get(
                 url,
                 params={
