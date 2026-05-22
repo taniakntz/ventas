@@ -481,6 +481,8 @@ with tab3:
                                     """
                                 )
 
+                        st.write(datos_update)
+                        
                         supabase.table("pedidos") \
                             .update(datos_update) \
                             .eq("id", rid) \
