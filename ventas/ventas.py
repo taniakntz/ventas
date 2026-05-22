@@ -68,58 +68,31 @@ def calcular_total(batata, membrillo, precio_doc, precio_med):
     return total
 
 def obtener_coordenadas(direccion):
-    if not direccion: 
-        return None, None
-        
-    # 1. Reemplazamos el '&' por 'y' para evitar conflictos de URL
-    texto_limpio = re.sub(r'[&]', 'y', direccion).strip()
+    if not direccion: return None, None
     
+    texto = str(direccion).replace("&", "y").strip()
+    if "Oberá" not in texto: texto = f"{texto}, Oberá"
+    if "Misiones" not in texto: texto = f"{texto}, Misiones, Argentina"
+    
+    headers = {'User-Agent': 'PastelitosApp_Admin/5.0'}
     url = "https://nominatim.openstreetmap.org/search"
-    headers = {
-        'User-Agent': 'PastelitosApp_Obera_Misiones_v4/1.0 (contacto: tania_admin@domain.com)',
-        'Accept-Language': 'es'
-    }
-    
-    # 2. Intentamos separar el nombre de la calle del número usando Regex
-    # Busca un patrón de texto seguido de un número al final (ej: "Neuquén 211")
-    match = re.match(r"^(.+?)\s+(\d+)$", texto_limpio)
-    
-    if match:
-        calle = match.group(1).strip()
-        numero = match.group(2).strip()
-        # Estructura oficial combinando calle y altura
-        calle_con_altura = f"{calle} {numero}"
-    else:
-        # Si la dirección no tiene número (ej: es una esquina), la dejamos como está
-        calle_con_altura = texto_limpio
-
-    params = {
-        'street': calle_con_altura,  # <-- Acá viaja "Nombre + Altura"
-        'city': 'Oberá',
-        'state': 'Misiones',
-        'country': 'Argentina',
-        'format': 'json',
-        'limit': 1
-    }
     
     try:
-        # Intento 1: Búsqueda con la altura incluida
-        res = requests.get(url, params=params, headers=headers)
+        res = requests.get(url, params={'q': texto, 'format': 'json', 'limit': 1}, headers=headers)
         if res.status_code == 200 and res.json():
-            data = res.json()
-            return float(data[0]['lat']), float(data[0]['lon'])
+            return float(res.json()[0]['lat']), float(res.json()[0]['lon'])
             
-        # Intento 2 (Plan B): Si falló por la altura, se la quitamos y buscamos solo la calle
-        if match:
-            params['street'] = match.group(1).strip() # Solo el nombre de la calle
-            res_fallback = requests.get(url, params=params, headers=headers)
-            if res_fallback.status_code == 200 and res_fallback.json():
-                data_fall = res_fallback.json()
-                return float(data_fall[0]['lat']), float(data_fall[0]['lon'])
-                
-    except Exception:
-        pass
+        texto_sin_numeros = re.sub(r'\d+', '', texto).strip()
+        texto_sin_numeros = re.sub(r'\s+', ' ', texto_sin_numeros)
         
+        time.sleep(1) # Pacing estructural
+        
+        res_fall = requests.get(url, params={'q': texto_sin_numeros, 'format': 'json', 'limit': 1}, headers=headers)
+        if res_fall.status_code == 200 and res_fall.json():
+            return float(res_fall.json()[0]['lat']), float(res_fall.json()[0]['lon'])
+            
+    except: pass
+    
     return None, None
     
 def exportar_excel(dataframe):
@@ -312,7 +285,7 @@ with tab3:
     if "ids_en_ruta" not in st.session_state: st.session_state.ids_en_ruta = []
 
     try:
-        if pedidos_req.data:
+        if not df.empty:
             envios = df[df['modalidad_entrega'] == "Envio_Domicilio"].copy()
             if not envios.empty:
                 filt = st.selectbox("Filtro Horario", ["Todos"] + sorted(list(envios['rango_horario'].dropna().unique())))
@@ -321,43 +294,52 @@ with tab3:
                 
                 st.subheader("📍 Datos de Envío")
                 
-                # Diagnóstico visual
                 sin_coordenadas = df_log[df_log['latitud'].isnull() | df_log['longitud'].isnull()]
                 if not sin_coordenadas.empty:
-                    st.warning(f"⚠️ Hay {len(sin_coordenadas)} pedidos sin coordenadas. Presioná 'Actualizar Logística' para reintentar la búsqueda con el Plan B.")
-                    with st.expander("Ver clientes pendientes de mapeo"):
+                    st.warning(f"⚠️ Hay {len(sin_coordenadas)} pedidos sin mapear.")
+                    with st.expander("Ver clientes pendientes"):
                         st.write(sin_coordenadas[["cliente_nombre", "direccion_envio"]])
 
-                res_log = st.data_editor(df_log[["id", "cliente_nombre", "direccion_envio", "rango_horario", "Incluir"]], 
-                                         column_config={
-                                             "id":None, "cliente_nombre":st.column_config.TextColumn(disabled=True),
-                                             "Incluir": st.column_config.CheckboxColumn("Incluir", default=True),
-                                             "rango_horario":st.column_config.SelectboxColumn("Horario", options=["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"])
-                                         }, hide_index=True, key="log_vfinal")
+                res_log = st.data_editor(
+                    df_log[["id", "cliente_nombre", "direccion_envio", "rango_horario", "latitud", "longitud", "Incluir"]], 
+                    column_config={
+                        "id": None, 
+                        "cliente_nombre": st.column_config.TextColumn("Cliente", disabled=True),
+                        "Incluir": st.column_config.CheckboxColumn("Incluir", default=True),
+                        "rango_horario": st.column_config.SelectboxColumn("Horario", options=["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"]),
+                        "latitud": st.column_config.NumberColumn("Latitud", format="%.6f"),
+                        "longitud": st.column_config.NumberColumn("Longitud", format="%.6f")
+                    }, 
+                    hide_index=True, 
+                    key="log_vfinal"
+                )
                 
-                col_l1, col_l2 = st.columns(2)
-                if col_l1.button("📍 Actualizar Logística"):
+                col_l1, col_l2, col_l3 = st.columns(3)
+                
+                if col_l1.button("💾 Guardar Edición de Tabla"):
                     st_l = st.session_state["log_vfinal"]
-                    
-                    # 1. Guardar las ediciones manuales quitando la columna virtual "Incluir"
                     if st_l["edited_rows"]:
                         for i_s, m in st_l["edited_rows"].items():
                             rid = df_log.iloc[int(i_s)]["id"]
                             datos_a_guardar = m.copy()
-                            
-                            if "Incluir" in datos_a_guardar:
-                                del datos_a_guardar["Incluir"]
-                            
+                            if "Incluir" in datos_a_guardar: del datos_a_guardar["Incluir"]
                             if datos_a_guardar:
-                                if "direccion_envio" in datos_a_guardar:
-                                    lat, lon = obtener_coordenadas(datos_a_guardar["direccion_envio"])
-                                    datos_a_guardar.update({"latitud": lat, "longitud": lon})
                                 supabase.table("pedidos").update(datos_a_guardar).eq("id", rid).execute()
+                        st.session_state.datos_ruta_cache = None 
+                        st.rerun()
 
-                    st.session_state.datos_ruta_cache = None 
-                    st.rerun()
+                if col_l2.button("🔍 Automatizar Búsqueda API"):
+                    if not sin_coordenadas.empty:
+                        with st.spinner("Mapeando lote en OpenStreetMap..."):
+                            for _, row in sin_coordenadas.iterrows():
+                                lat, lon = obtener_coordenadas(row["direccion_envio"])
+                                if lat is not None:
+                                    supabase.table("pedidos").update({"latitud": lat, "longitud": lon}).eq("id", row["id"]).execute()
+                                time.sleep(1.5)
+                            st.session_state.datos_ruta_cache = None
+                            st.rerun()
 
-                if col_l2.button("🗺️ Generar/Ver Ruta Óptima"):
+                if col_l3.button("🗺️ Generar Ruta Óptima"):
                     ready_ids = res_log[res_log['Incluir'] == True]['id'].tolist()
                     
                     if st.session_state.datos_ruta_cache is None or ready_ids != st.session_state.ids_en_ruta:
@@ -365,10 +347,9 @@ with tab3:
                             ready_coords = df_log[(df_log['id'].isin(ready_ids)) & (df_log['latitud'].notnull())]
                             
                             if len(ready_coords) < 1:
-                                st.error("❌ Ninguno de los pedidos tiene coordenadas válidas.")
+                                st.error("❌ Ninguno de los pedidos seleccionados tiene coordenadas válidas.")
                             else:
                                 origen = [-55.1089, -27.4766] 
-                                
                                 body_vrp = {
                                     "vehicles": [{"id": 1, "profile": "driving-car", "start": origen, "end": origen}],
                                     "jobs": [{"id": i, "location": [row['longitud'], row['latitud']]} for i, (_, row) in enumerate(ready_coords.iterrows())]
