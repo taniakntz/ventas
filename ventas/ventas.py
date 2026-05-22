@@ -68,35 +68,37 @@ def calcular_total(batata, membrillo, precio_doc, precio_med):
     return total
 
 def obtener_coordenadas(direccion):
-    if not direccion: return None, None
+    if not direccion or str(direccion).strip().upper() == "EMPTY": 
+        return None, None
     
     texto = str(direccion).replace("&", "y").strip()
     if "Oberá" not in texto: texto = f"{texto}, Oberá"
     if "Misiones" not in texto: texto = f"{texto}, Misiones, Argentina"
     
-    headers = {'User-Agent': 'PastelitosApp/1.0'}
+    headers = {'User-Agent': 'PastelitosLogistica_Diag/1.0 (contacto: admin@obera.com)'}
+    url = "https://nominatim.openstreetmap.org/search"
+    params = {'q': texto, 'format': 'json', 'limit': 1}
     
     try:
-        # TIMEOUT CRÍTICO de 5 segundos para evitar el bucle infinito
-        url = f"https://nominatim.openstreetmap.org/search?q={texto}&format=json&limit=1"
-        res = requests.get(url, headers=headers, timeout=5)
-        if res.status_code == 200 and len(res.json()) > 0:
-            return float(res.json()[0]['lat']), float(res.json()[0]['lon'])
-            
-        # Fallback sin números y pacing para asegurar tasa de acierto
-        texto_sin_numeros = re.sub(r'\d+', '', texto).strip()
-        texto_sin_numeros = re.sub(r'\s+', ' ', texto_sin_numeros)
+        # Petición principal
+        res = requests.get(url, params=params, headers=headers, timeout=5)
         
-        time.sleep(1.5)
-        url_fall = f"https://nominatim.openstreetmap.org/search?q={texto_sin_numeros}&format=json&limit=1"
-        res_fall = requests.get(url_fall, headers=headers, timeout=5)
+        # TELEMETRÍA: Muestra el estado exacto de la respuesta
+        st.toast(f"Consulta: '{texto}' | Estado HTTP: {res.status_code}")
         
-        if res_fall.status_code == 200 and len(res_fall.json()) > 0:
-            return float(res_fall.json()[0]['lat']), float(res_fall.json()[0]['lon'])
+        if res.status_code == 200:
+            data = res.json()
+            if len(data) > 0:
+                return float(data[0]['lat']), float(data[0]['lon'])
+            else:
+                # Si llega acá, el servidor no bloqueó la IP, pero no supo encontrar la calle
+                st.warning(f"La API respondió correctamente pero devolvió resultados vacíos para: '{texto}'")
+        else:
+            # Si llega acá, el servidor bloqueó la IP (Ej: Error 403 Forbidden o 429 Too Many Requests)
+            st.error(f"Bloqueo del servidor OSM (HTTP {res.status_code}): {res.text[:150]}")
             
-    except Exception:
-        # Pasa en silencio y libera la UI si el servidor se cae
-        pass 
+    except Exception as e:
+        st.error(f"Cuelgue de red al intentar conectar con OSM: {str(e)}")
         
     return None, None
     
