@@ -115,57 +115,60 @@ def obtener_coordenadas(direccion):
     for espera in tiempos_espera:
     
         try:
-    
+
             time.sleep(1)
-            
+        
+            st.write("QUERY FINAL:", texto)
+        
             res = requests.get(
                 url,
                 params={
                     'q': texto,
                     'format': 'json',
-                    'limit': 3,
+                    'limit': 1,
                     'countrycodes': 'ar'
                 },
                 headers=headers,
                 timeout=15
             )
-            
+        
             st.write("STATUS:", res.status_code)
-            st.write("QUERY FINAL:", texto)
-            
-            if res.status_code == 200:
-
-                data = res.json()
-
-                # DEBUG OPCIONAL
-                # st.write("Buscando:", texto)
-                # st.write(data)
-
-                if data:
-                    return (
-                        float(data[0]['lat']),
-                        float(data[0]['lon'])
-                    )
-
-                return None, None
-
-            elif res.status_code == 429:
-
-                st.toast(
-                    f"Servidor saturado. Esperando {espera} segundos..."
+        
+            if res.status_code == 429:
+        
+                st.error(
+                    """
+                    ⚠️ Nominatim bloqueó temporalmente las requests.
+                    Esperá unos minutos antes de volver a intentar.
+                    """
                 )
-
-                time.sleep(espera)
-                continue
-
-            else:
-                break
-
+        
+                return None, None
+        
+            if res.status_code != 200:
+        
+                st.error(f"HTTP {res.status_code}")
+        
+                return None, None
+        
+            data = res.json()
+        
+            st.write("DATA:", data)
+        
+            if not data:
+        
+                return None, None
+        
+            return (
+                float(data[0]['lat']),
+                float(data[0]['lon'])
+            )
+        
         except Exception as e:
+        
             st.error(f"ERROR REAL: {e}")
-            time.sleep(espera)
-
-    return None, None
+        
+            return None, None
     
 def exportar_excel(dataframe):
     output = BytesIO()
