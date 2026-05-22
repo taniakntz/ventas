@@ -117,13 +117,13 @@ with tab1:
             c_ran = st.selectbox("Rango Horario", ["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"], key="in_ran")
     
         if st.button("Guardar Pedido", type="primary"):
-            if not c_nom: 
+            if not c_nom.strip(): 
                 st.error("⚠️ El nombre es obligatorio.")
             else:
                 total = calcular_total(c_bat, c_mem, PRECIO_DOCENA, PRECIO_MEDIA)
                 lat, lon = obtener_coordenadas(c_dir) if c_dir else (None, None)
                 
-                # 1. Ejecución de guardado
+                # 1. Inserción en la base de datos
                 supabase.table("pedidos").insert({
                     "campana_id": ID_CAMPANA, "cliente_nombre": c_nom, "docenas_batata": c_bat,
                     "docenas_membrillo": c_mem, "total_calculado": total, "estado_pago": c_pag,
@@ -131,15 +131,19 @@ with tab1:
                     "latitud": lat, "longitud": lon
                 }).execute()
                 
-                # 2. LIMPIEZA DE CAMPOS (Insertado acá)
-                campos_a_limpiar = ["in_nom", "in_bat", "in_mem", "in_mod", "in_pag", "in_met", "in_dir", "in_ran"]
-                for clave in campos_a_limpiar:
-                    if clave in st.session_state:
-                        del st.session_state[clave]
+                # 2. Sobrescritura explícita para forzar el vaciado en el frontend
+                st.session_state["in_nom"] = ""
+                st.session_state["in_bat"] = 0.0
+                st.session_state["in_mem"] = 0.0
+                st.session_state["in_mod"] = "Retiro_Local"
+                st.session_state["in_pag"] = "Pendiente"
+                st.session_state["in_met"] = "N/A"
+                if "in_dir" in st.session_state:
+                    st.session_state["in_dir"] = ""
                 
-                # 3. Recarga de la app
+                # 3. Recarga
                 st.rerun()
-    
+                
         st.divider()
         pedidos_req = supabase.table("pedidos").select("*").eq("campana_id", ID_CAMPANA).execute()
         if pedidos_req.data:
