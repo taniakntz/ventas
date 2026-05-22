@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import requests
+import re
 from io import BytesIO
 from datetime import date
 from supabase import create_client, Client
@@ -66,12 +67,23 @@ def calcular_total(batata, membrillo, precio_doc, precio_med):
     return total
 
 def obtener_coordenadas(direccion):
-    url = f"https://nominatim.openstreetmap.org/search?q={direccion}&format=json&limit=1"
-    headers = {'User-Agent': 'PastelitosApp/1.0'}
+    if not direccion: return None, None
+    if "Oberá" not in direccion: direccion = f"{direccion}, Oberá"
+    
+    dir_exacta = f"{direccion}, Misiones, Argentina"
+    headers = {'User-Agent': 'PastelitosApp/2.0'}
+    
     try:
-        res = requests.get(url, headers=headers)
-        if res.status_code == 200 and len(res.json()) > 0:
-            return float(res.json()[0]['lat']), float(res.json()[0]['lon'])
+        # Intento 1: Dirección exacta
+        res_1 = requests.get(f"https://nominatim.openstreetmap.org/search?q={dir_exacta}&format=json&limit=1", headers=headers)
+        if res_1.status_code == 200 and res_1.json():
+            return float(res_1.json()[0]['lat']), float(res_1.json()[0]['lon'])
+            
+        # Intento 2: Fallback (Quita los números para forzar la ubicación de la calle)
+        dir_sin_numeros = re.sub(r'\d+', '', direccion)
+        res_2 = requests.get(f"https://nominatim.openstreetmap.org/search?q={dir_sin_numeros}, Misiones, Argentina&format=json&limit=1", headers=headers)
+        if res_2.status_code == 200 and res_2.json():
+            return float(res_2.json()[0]['lat']), float(res_2.json()[0]['lon'])
     except: pass
     return None, None
 
@@ -261,13 +273,13 @@ with tab2:
 # --- PESTAÑA 3: REPARTO ---
 with tab3:
     st.header("🚚 Logística")
-    
+    if "datos_ruta_cache" not in st.session_state: st.session_state.datos_ruta_cache = None
+    if "ids_en_ruta" not in st.session_state: st.session_state.ids_en_ruta = []
+
     try:
-        if "datos_ruta_cache" not in st.session_state: st.session_state.datos_ruta_cache = None
-        if "ids_en_ruta" not in st.session_state: st.session_state.ids_en_ruta = []
-    
-        if pedidos_req.data:
-            envios = df[df['modalidad_entrega'] == "Envio_Domicilio"].copy()
+        # Usamos df_pedidos asumiendo que lo declaraste de forma global como acordamos antes
+        if not df_pedidos.empty:
+            envios = df_pedidos[df_pedidos['modalidad_entrega'] == "Envio_Domicilio"].copy()
             if not envios.empty:
                 filt = st.selectbox("Filtro Horario", ["Todos"] + sorted(list(envios['rango_horario'].dropna().unique())))
                 df_log = envios if filt == "Todos" else envios[envios['rango_horario'] == filt]
@@ -275,13 +287,13 @@ with tab3:
                 
                 st.subheader("📍 Datos de Envío")
                 
-                # --- TELEMETRÍA 1: DIAGNÓSTICO DE COORDENADAS EN BASE DE DATOS ---
+                # Diagnóstico visual
                 sin_coordenadas = df_log[df_log['latitud'].isnull() | df_log['longitud'].isnull()]
                 if not sin_coordenadas.empty:
-                    st.warning(f"⚠️ Alerta: Hay {len(sin_coordenadas)} pedidos en esta lista que NO tienen coordenadas asignadas en Supabase. Si cambiaste la dirección, asegurate de marcar la celda y pulsar el botón 'Actualizar Logística'.")
-                    with st.expander("Ver clientes sin coordenadas válidas"):
+                    st.warning(f"⚠️ Hay {len(sin_coordenadas)} pedidos sin coordenadas. Presioná 'Actualizar Logística' para reintentar la búsqueda con el Plan B.")
+                    with st.expander("Ver clientes pendientes de mapeo"):
                         st.write(sin_coordenadas[["cliente_nombre", "direccion_envio"]])
-    
+
                 res_log = st.data_editor(df_log[["id", "cliente_nombre", "direccion_envio", "rango_horario", "Incluir"]], 
                                          column_config={
                                              "id":None, "cliente_nombre":st.column_config.TextColumn(disabled=True),
@@ -292,16 +304,32 @@ with tab3:
                 col_l1, col_l2 = st.columns(2)
                 if col_l1.button("📍 Actualizar Logística"):
                     st_l = st.session_state["log_vfinal"]
+                    
+                    # 1. Guardar las ediciones manuales quitando la columna virtual "Incluir"
                     if st_l["edited_rows"]:
                         for i_s, m in st_l["edited_rows"].items():
                             rid = df_log.iloc[int(i_s)]["id"]
-                            if "direccion_envio" in m:
-                                lat, lon = obtener_coordenadas(m["direccion_envio"])
-                                m.update({"latitud": lat, "longitud": lon})
-                            supabase.table("pedidos").update(m).eq("id", rid).execute()
+                            datos_a_guardar = m.copy()
+                            
+                            if "Incluir" in datos_a_guardar:
+                                del datos_a_guardar["Incluir"]
+                            
+                            if datos_a_guardar:
+                                if "direccion_envio" in datos_a_guardar:
+                                    lat, lon = obtener_coordenadas(datos_a_guardar["direccion_envio"])
+                                    datos_a_guardar.update({"latitud": lat, "longitud": lon})
+                                supabase.table("pedidos").update(datos_a_guardar).eq("id", rid).execute()
+                    
+                    # 2. Reintento automático para los que fallaron antes
+                    if not sin_coordenadas.empty:
+                        for _, row in sin_coordenadas.iterrows():
+                            lat, lon = obtener_coordenadas(row["direccion_envio"])
+                            if lat is not None and lon is not None:
+                                supabase.table("pedidos").update({"latitud": lat, "longitud": lon}).eq("id", row["id"]).execute()
+
                     st.session_state.datos_ruta_cache = None 
                     st.rerun()
-    
+
                 if col_l2.button("🗺️ Generar/Ver Ruta Óptima"):
                     ready_ids = res_log[res_log['Incluir'] == True]['id'].tolist()
                     
@@ -309,9 +337,8 @@ with tab3:
                         with st.spinner("Calculando ruta real..."):
                             ready_coords = df_log[(df_log['id'].isin(ready_ids)) & (df_log['latitud'].notnull())]
                             
-                            # --- TELEMETRÍA 2: VALIDACIÓN DE REQUISITO MÍNIMO ---
                             if len(ready_coords) < 1:
-                                st.error("❌ Error de ejecución: Ninguno de los pedidos seleccionados posee coordenadas válidas (`latitud` / `longitud`) en la base de datos. El mapa no puede inicializarse en base a valores nulos.")
+                                st.error("❌ Ninguno de los pedidos tiene coordenadas válidas.")
                             else:
                                 origen = [-55.1089, -27.4766] 
                                 
@@ -320,26 +347,23 @@ with tab3:
                                     "jobs": [{"id": i, "location": [row['longitud'], row['latitud']]} for i, (_, row) in enumerate(ready_coords.iterrows())]
                                 }
                                 headers = {"Authorization": st.secrets["ORS_API_KEY"], "Content-Type": "application/json"}
-                                
                                 res_vrp = requests.post("https://api.openrouteservice.org/optimization", json=body_vrp, headers=headers)
                                 
-                                # --- TELEMETRÍA 3: CONTROL DE EXCEPCIONES EN API VRP ---
                                 if res_vrp.status_code == 200:
                                     data_vrp = res_vrp.json()
                                     orden_coords = [origen]
                                     info_clientes = []
-    
+
                                     for step in data_vrp['routes'][0]['steps']:
                                         lon_s, lat_s = step['location']
                                         orden_coords.append([lon_s, lat_s])
                                         if step['type'] == 'job':
                                             c_n = ready_coords.iloc[step['job']]['cliente_nombre']
                                             info_clientes.append({"lat": lat_s, "lon": lon_s, "nombre": c_n})
-    
+
                                     body_dir = {"coordinates": orden_coords}
                                     res_dir = requests.post("https://api.openrouteservice.org/v2/directions/driving-car/geojson", json=body_dir, headers=headers)
                                     
-                                    # --- TELEMETRÍA 4: CONTROL DE EXCEPCIONES EN API DIRECTIONS ---
                                     if res_dir.status_code == 200:
                                         st.session_state.datos_ruta_cache = {
                                             "geojson": res_dir.json(),
@@ -348,11 +372,10 @@ with tab3:
                                         }
                                         st.session_state.ids_en_ruta = ready_ids
                                     else:
-                                        st.error(f"❌ Error HTTP {res_dir.status_code} en servicio ORS Directions: {res_dir.text}")
+                                        st.error(f"❌ Error HTTP {res_dir.status_code} al trazar calles.")
                                 else:
-                                    st.error(f"❌ Error HTTP {res_vrp.status_code} en servicio ORS Optimization (VRP): {res_vrp.text}")
-    
-                # Renderizado condicional basado en la existencia de datos consolidados en memoria
+                                    st.error(f"❌ Error HTTP {res_vrp.status_code} al optimizar ruta.")
+
                 if st.session_state.datos_ruta_cache:
                     cache = st.session_state.datos_ruta_cache
                     m = folium.Map(location=cache["origen"], zoom_start=14)
@@ -362,15 +385,13 @@ with tab3:
                         folium.Marker([c["lat"], c["lon"]], popup=f"Cliente: {c['nombre']}", icon=folium.Icon(color="red")).add_to(m)
                     
                     folium.GeoJson(cache["geojson"], style_function=lambda x: {'color': 'blue', 'weight': 5, 'opacity': 0.7}).add_to(m)
-                    
                     st_folium(m, width=800, height=500, key="mapa_reparto")
             else:
                 st.info("No hay pedidos con envío a domicilio.")
-                
+        else:
+            st.info("La base de pedidos está vacía.")
     except Exception as e:
-        # Mostramos el error solo en esta sección
-        st.error(f"Error en Envios: {e}")
-        st.info("Podés seguir usando las otras pestañas normalmente.")  
+        st.error(f"Error en Logística: {e}")
         
 # --- PESTAÑA 4: CONFIGURACIÓN ---
 with tab4:
