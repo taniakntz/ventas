@@ -68,22 +68,56 @@ def calcular_total(batata, membrillo, precio_doc, precio_med):
     return total
 
 def obtener_coordenadas(direccion):
-    if not direccion: return None, None
-    if "Oberá" not in direccion: direccion = f"{direccion}, Oberá"
+    if not direccion: 
+        return None, None
+        
+    # 1. Reemplazamos el '&' por 'y' para evitar conflictos de URL
+    texto_limpio = re.sub(r'[&]', 'y', direccion).strip()
     
-    dir_exacta = f"{direccion}, Misiones, Argentina"
-    headers = {'User-Agent': 'PastelitosApp_Obera/3.0'}
+    url = "https://nominatim.openstreetmap.org/search"
+    headers = {
+        'User-Agent': 'PastelitosApp_Obera_Misiones_v4/1.0 (contacto: tania_admin@domain.com)',
+        'Accept-Language': 'es'
+    }
+    
+    # 2. Intentamos separar el nombre de la calle del número usando Regex
+    # Busca un patrón de texto seguido de un número al final (ej: "Neuquén 211")
+    match = re.match(r"^(.+?)\s+(\d+)$", texto_limpio)
+    
+    if match:
+        calle = match.group(1).strip()
+        numero = match.group(2).strip()
+        # Estructura oficial combinando calle y altura
+        calle_con_altura = f"{calle} {numero}"
+    else:
+        # Si la dirección no tiene número (ej: es una esquina), la dejamos como está
+        calle_con_altura = texto_limpio
+
+    params = {
+        'street': calle_con_altura,  # <-- Acá viaja "Nombre + Altura"
+        'city': 'Oberá',
+        'state': 'Misiones',
+        'country': 'Argentina',
+        'format': 'json',
+        'limit': 1
+    }
     
     try:
-        res_1 = requests.get(f"https://nominatim.openstreetmap.org/search?q={dir_exacta}&format=json&limit=1", headers=headers)
-        if res_1.status_code == 200 and res_1.json():
-            return float(res_1.json()[0]['lat']), float(res_1.json()[0]['lon'])
+        # Intento 1: Búsqueda con la altura incluida
+        res = requests.get(url, params=params, headers=headers)
+        if res.status_code == 200 and res.json():
+            data = res.json()
+            return float(data[0]['lat']), float(data[0]['lon'])
             
-        dir_sin_numeros = re.sub(r'\d+', '', direccion)
-        res_2 = requests.get(f"https://nominatim.openstreetmap.org/search?q={dir_sin_numeros}, Misiones, Argentina&format=json&limit=1", headers=headers)
-        if res_2.status_code == 200 and res_2.json():
-            return float(res_2.json()[0]['lat']), float(res_2.json()[0]['lon'])
-    except:
+        # Intento 2 (Plan B): Si falló por la altura, se la quitamos y buscamos solo la calle
+        if match:
+            params['street'] = match.group(1).strip() # Solo el nombre de la calle
+            res_fallback = requests.get(url, params=params, headers=headers)
+            if res_fallback.status_code == 200 and res_fallback.json():
+                data_fall = res_fallback.json()
+                return float(data_fall[0]['lat']), float(data_fall[0]['lon'])
+                
+    except Exception:
         pass
         
     return None, None
