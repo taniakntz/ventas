@@ -448,7 +448,10 @@ with tab3:
                             lat, lon = obtener_coordenadas(
                                 direccion
                             )
-
+                            
+                            st.write("LAT:", lat)
+                            st.write("LON:", lon)
+                            
                             if (
                                 lat is not None
                                 and
