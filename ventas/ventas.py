@@ -578,7 +578,7 @@ with tab3:
             # =====================================
             
             if col_l2.button("🗺️ Generar/Ver Ruta Óptima"):
-
+            
                 try:
             
                     pedidos_ruta = []
@@ -616,14 +616,9 @@ with tab3:
             
                     else:
             
-                        # =====================================
-                        # ORIGEN FIJO DEL LOCAL
-                        # =====================================
-            
                         ORIGEN_LAT = -27.4872
                         ORIGEN_LON = -55.1194
             
-                        # ORS USA [LON, LAT]
                         coords_ors = [
                             [ORIGEN_LON, ORIGEN_LAT]
                         ]
@@ -634,10 +629,6 @@ with tab3:
                                 p["lon"],
                                 p["lat"]
                             ])
-            
-                        # =====================================
-                        # DIRECTIONS API
-                        # =====================================
             
                         url_dir = (
                             "https://api.openrouteservice.org/v2/directions/driving-car/geojson"
@@ -664,10 +655,6 @@ with tab3:
             
                             geojson = res_dir.json()
             
-                            # =====================================
-                            # MAPA
-                            # =====================================
-            
                             m = folium.Map(
                                 location=[
                                     ORIGEN_LAT,
@@ -676,7 +663,6 @@ with tab3:
                                 zoom_start=14
                             )
             
-                            # LOCAL
                             folium.Marker(
                                 [ORIGEN_LAT, ORIGEN_LON],
                                 popup="LOCAL",
@@ -686,7 +672,6 @@ with tab3:
                                 )
                             ).add_to(m)
             
-                            # CLIENTES
                             for p in pedidos_ruta:
             
                                 folium.Marker(
@@ -697,7 +682,6 @@ with tab3:
                                     )
                                 ).add_to(m)
             
-                            # RUTA
                             folium.GeoJson(
                                 geojson,
                                 style_function=lambda x: {
@@ -730,6 +714,7 @@ with tab3:
                             )
             
                 except Exception as e:
+            
                     st.error(f"Error generando ruta: {e}")
 
     except Exception:
