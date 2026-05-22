@@ -100,7 +100,14 @@ def obtener_coordenadas(direccion):
     url = "https://nominatim.openstreetmap.org/search"
 
     headers = {
-        "User-Agent": "PastelitosLogistica_Pro_v11"
+        "User-Agent": (
+            "Mozilla/5.0 "
+            "(Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 "
+            "(KHTML, like Gecko) "
+            "Chrome/120.0 Safari/537.36"
+        ),
+        "Accept-Language": "es"
     }
 
     tiempos_espera = [2, 5, 10]
@@ -111,6 +118,7 @@ def obtener_coordenadas(direccion):
     
             time.sleep(1)
             
+            st.write("STATUS:", res.status_code)
             st.write("QUERY FINAL:", texto)
             
             res = requests.get(
