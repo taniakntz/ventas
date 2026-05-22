@@ -71,49 +71,50 @@ def obtener_coordenadas(direccion):
     if not direccion or str(direccion).strip().upper() == "EMPTY": 
         return None, None
         
-    texto = str(direccion).strip()
-
-    # Interceptor manual por si pegás las coordenadas de Google
-    match_coords = re.search(r'(-?\d{1,2}\.\d+)[,\s]+(-?\d{1,3}\.\d+)', texto)
+    texto_original = str(direccion).strip().replace("&", "y")
+    
+    # 1. Interceptor de coordenadas crudas
+    match_coords = re.search(r'(-?\d{1,2}\.\d+)[,\s]+(-?\d{1,3}\.\d+)', texto_original)
     if match_coords:
         return float(match_coords.group(1)), float(match_coords.group(2))
+
+    url = "https://nominatim.openstreetmap.org/search"
+    headers = {'User-Agent': 'PastelitosLogistica_Aprox/1.0 (contacto: admin@obera.com)'}
     
-    # Limpieza de texto
-    texto = texto.replace("&", "y")
-    if "Oberá" not in texto: texto = f"{texto}, Oberá, Misiones"
-    
-    # NUEVO MOTOR: Geocodificador de OpenRouteService
-    api_key = st.secrets.get("ORS_API_KEY", "")
-    if not api_key:
-        st.error("🚨 Falta ORS_API_KEY en secretos.")
-        return None, None
+    # 2. INTENTO EXACTO: Busca la calle y el número de puerta
+    q_exacta = texto_original
+    if "Oberá" not in q_exacta: 
+        q_exacta += ", Oberá"
         
-    url = "https://api.openrouteservice.org/geocode/search"
-    params = {
-        'api_key': api_key,
-        'text': texto,
-        'size': 1 # Solo queremos el mejor resultado
-    }
-    
     try:
-        res = requests.get(url, params=params, timeout=5)
-        
-        if res.status_code == 200:
-            data = res.json()
-            if data.get('features') and len(data['features']) > 0:
-                # ORS devuelve la geometría en formato [Longitud, Latitud]
-                lon, lat = data['features'][0]['geometry']['coordinates']
-                return float(lat), float(lon)
-            else:
-                st.toast(f"❌ El mapa no encontró: '{texto}'")
-        else:
-            st.toast(f"❌ Error de servidor ORS: HTTP {res.status_code}")
+        res1 = requests.get(url, params={'q': q_exacta, 'format': 'json', 'limit': 1}, headers=headers, timeout=5)
+        if res1.status_code == 200 and len(res1.json()) > 0:
+            return float(res1.json()[0]['lat']), float(res1.json()[0]['lon'])
             
-    except Exception as e:
-        st.toast(f"❌ Cuelgue de red: {e}")
+        # 3. INTENTO APROXIMADO: Si falló, borra los números y busca el centro de la calle
+        texto_sin_numeros = re.sub(r'\d+', '', texto_original).strip()
+        texto_sin_numeros = re.sub(r'\s+', ' ', texto_sin_numeros).replace(" ,", ",").strip()
         
-    return None, None    
-def exportar_excel(dataframe):
+        q_aprox = texto_sin_numeros
+        if "Oberá" not in q_aprox: 
+            q_aprox += ", Oberá"
+            
+        time.sleep(1.5) # Pausa estricta para evitar baneo del firewall de OSM
+        res2 = requests.get(url, params={'q': q_aprox, 'format': 'json', 'limit': 1}, headers=headers, timeout=5)
+        
+        if res2.status_code == 200 and len(res2.json()) > 0:
+            lat = res2.json()[0]['lat']
+            lon = res2.json()[0]['lon']
+            # Telemetría para avisarte que tuvo que usar el punto medio
+            st.toast(f"📍 Usando ubicación aproximada (centro de calle) para: {texto_original}")
+            return float(lat), float(lon)
+            
+    except Exception:
+        pass 
+        
+    return None, None
+    
+    def exportar_excel(dataframe):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         dataframe.to_excel(writer, index=False, sheet_name='Ventas')
