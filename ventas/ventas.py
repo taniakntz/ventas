@@ -162,6 +162,7 @@ def obtener_coordenadas(direccion):
                 break
 
         except Exception:
+            st.error(f"ERROR REAL: {e}")
             time.sleep(espera)
 
     return None, None
