@@ -99,31 +99,35 @@ tab1, tab2, tab3, tab4 = st.tabs(["📦 Pedidos", "📈 Finanzas", "🚚 Reparto
 with tab1:
     st.header("📝 Nuevo Pedido")
 
+    # Inicializador de clave dinámica para limpieza de UI
+    if "form_key" not in st.session_state:
+        st.session_state.form_key = 0
+
     try:
-        # Widgets reactivos para ingreso
-        c_nom = st.text_input("Nombre del Cliente", key="in_nom")
+        fk = str(st.session_state.form_key)
+        
+        c_nom = st.text_input("Nombre del Cliente", key=f"in_nom_{fk}")
         col1, col2 = st.columns(2)
-        with col1: c_bat = st.number_input("Docenas Batata", 0.0, step=0.25, key="in_bat")
-        with col2: c_mem = st.number_input("Docenas Membrillo", 0.0, step=0.25, key="in_mem")
+        with col1: c_bat = st.number_input("Docenas Batata", 0.0, step=0.25, key=f"in_bat_{fk}")
+        with col2: c_mem = st.number_input("Docenas Membrillo", 0.0, step=0.25, key=f"in_mem_{fk}")
         
         col3, col4, col5 = st.columns(3)
-        with col3: c_mod = st.selectbox("Entrega", ["Retiro_Local", "Envio_Domicilio"], key="in_mod")
-        with col4: c_pag = st.selectbox("Estado de Pago", ["Pendiente", "Pagado"], key="in_pag")
-        with col5: c_met = st.selectbox("Método de Pago", ["N/A", "Efectivo", "MP"], key="in_met")
+        with col3: c_mod = st.selectbox("Entrega", ["Retiro_Local", "Envio_Domicilio"], key=f"in_mod_{fk}")
+        with col4: c_pag = st.selectbox("Estado de Pago", ["Pendiente", "Pagado"], key=f"in_pag_{fk}")
+        with col5: c_met = st.selectbox("Método de Pago", ["N/A", "Efectivo", "MP"], key=f"in_met_{fk}")
         
         c_dir, c_ran = None, None
         if c_mod == "Envio_Domicilio":
-            c_dir = st.text_input("Dirección de Envío", placeholder="Calle, Ciudad", key="in_dir")
-            c_ran = st.selectbox("Rango Horario", ["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"], key="in_ran")
-    
+            c_dir = st.text_input("Dirección de Envío", placeholder="Calle, Ciudad", key=f"in_dir_{fk}")
+            c_ran = st.selectbox("Rango Horario", ["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"], key=f"in_ran_{fk}")
+
         if st.button("Guardar Pedido", type="primary"):
-            if not c_nom.strip(): 
+            if not c_nom.strip():
                 st.error("⚠️ El nombre es obligatorio.")
             else:
                 total = calcular_total(c_bat, c_mem, PRECIO_DOCENA, PRECIO_MEDIA)
                 lat, lon = obtener_coordenadas(c_dir) if c_dir else (None, None)
                 
-                # 1. Inserción en la base de datos
                 supabase.table("pedidos").insert({
                     "campana_id": ID_CAMPANA, "cliente_nombre": c_nom, "docenas_batata": c_bat,
                     "docenas_membrillo": c_mem, "total_calculado": total, "estado_pago": c_pag,
@@ -131,38 +135,26 @@ with tab1:
                     "latitud": lat, "longitud": lon
                 }).execute()
                 
-                # 2. Sobrescritura explícita para forzar el vaciado en el frontend
-                st.session_state["in_nom"] = ""
-                st.session_state["in_bat"] = 0.0
-                st.session_state["in_mem"] = 0.0
-                st.session_state["in_mod"] = "Retiro_Local"
-                st.session_state["in_pag"] = "Pendiente"
-                st.session_state["in_met"] = "N/A"
-                if "in_dir" in st.session_state:
-                    st.session_state["in_dir"] = ""
-                
-                # 3. Recarga
+                # Destrucción de instancia para vaciar campos
+                st.session_state.form_key += 1
                 st.rerun()
-                
+
         st.divider()
-        pedidos_req = supabase.table("pedidos").select("*").eq("campana_id", ID_CAMPANA).execute()
-        if pedidos_req.data:
-            df = pd.DataFrame(pedidos_req.data)
-            
+        if not df_pedidos.empty:
             # --- MÓDULO DE PRODUCCIÓN ---
             st.subheader("🧑‍🍳 Resumen Producción")
-            df["docenas_batata"] = pd.to_numeric(df["docenas_batata"], errors="coerce").fillna(0)
-            df["docenas_membrillo"] = pd.to_numeric(df["docenas_membrillo"], errors="coerce").fillna(0)
-            b_t, m_t = df["docenas_batata"].sum(), df["docenas_membrillo"].sum()
+            df_pedidos["docenas_batata"] = pd.to_numeric(df_pedidos["docenas_batata"], errors="coerce").fillna(0)
+            df_pedidos["docenas_membrillo"] = pd.to_numeric(df_pedidos["docenas_membrillo"], errors="coerce").fillna(0)
+            b_t, m_t = df_pedidos["docenas_batata"].sum(), df_pedidos["docenas_membrillo"].sum()
             c1, c2, c3 = st.columns(3)
             c1.metric("Batata", decimal_a_fraccion(b_t))
             c2.metric("Membrillo", decimal_a_fraccion(m_t))
             c3.metric("Total", decimal_a_fraccion(b_t + m_t))
-    
+
             st.subheader("📋 Gestión de Pedidos")
-            df_ed = df[["id", "cliente_nombre", "docenas_batata", "docenas_membrillo", "estado_pago", "metodo_pago", "modalidad_entrega", "total_calculado"]].copy()
+            df_ed = df_pedidos[["id", "cliente_nombre", "docenas_batata", "docenas_membrillo", "estado_pago", "metodo_pago", "modalidad_entrega", "total_calculado"]].copy()
             
-            # Limpieza de nulos para evitar casilleros en blanco en los selectores
+            # Sanitización de datos nulos
             df_ed["estado_pago"] = df_ed["estado_pago"].replace([None, "", "nan"], "Pendiente")
             df_ed["metodo_pago"] = df_ed["metodo_pago"].replace([None, "", "nan"], "N/A")
             df_ed["modalidad_entrega"] = df_ed["modalidad_entrega"].replace([None, "", "nan"], "Retiro_Local")
@@ -175,12 +167,11 @@ with tab1:
                     "total_calculado": st.column_config.NumberColumn("Total ($)", disabled=True),
                     "modalidad_entrega": st.column_config.SelectboxColumn("Entrega", options=["Retiro_Local", "Envio_Domicilio"], required=True),
                     "estado_pago": st.column_config.SelectboxColumn("Pago", options=["Pendiente", "Pagado"], required=True),
-                    # Corrección del error de duplicación:
                     "metodo_pago": st.column_config.SelectboxColumn("Método", options=["N/A", "Efectivo", "MP"], required=True)
                 }, 
                 num_rows="dynamic", hide_index=True, key="p_v_final_strict"
             )
-    
+
             if st.button("💾 Guardar Cambios"):
                 state = st.session_state["p_v_final_strict"]
                 if state["edited_rows"]:
@@ -200,16 +191,16 @@ with tab1:
                         rid = df_ed.iloc[idx]["id"]
                         supabase.table("pedidos").delete().eq("id", rid).execute()
                 st.rerun()
-    
+
             # --- EXPORTACIÓN AL EXCEL ---
             st.divider()
-            df_excel = df.copy()
+            df_excel = df_pedidos.copy()
             df_excel["Batata"] = df_excel["docenas_batata"].apply(decimal_a_fraccion)
             df_excel["Membrillo"] = df_excel["docenas_membrillo"].apply(decimal_a_fraccion)
             
             excel_data = exportar_excel(df_excel[["cliente_nombre", "Batata", "Membrillo", "total_calculado", "estado_pago", "modalidad_entrega"]])
             st.download_button("📥 Descargar Planilla Excel (Formato A4)", data=excel_data, file_name=f"pedidos_{campana_activa}.xlsx")
-    
+
             # --- ZONA DE PELIGRO ---
             st.divider()
             with st.expander("⚠️ Zona de Peligro: Eliminar todos los pedidos"):
@@ -224,10 +215,8 @@ with tab1:
             st.info("No hay pedidos registrados en esta campaña.")
 
     except Exception as e:
-        # Mostramos el error solo en esta sección
-        st.error(f"Error en Pedidos: {e}")
-        st.info("Podés seguir usando las otras pestañas normalmente.")
-
+        st.error(f"Error en el módulo de Pedidos: {e}")
+        
 # --- PESTAÑA 2: FINANZAS ---
 with tab2:
     st.header("📈 Balance")
