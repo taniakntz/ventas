@@ -716,9 +716,14 @@ with tab3:
                 except Exception as e:
             
                     st.error(f"Error generando ruta: {e}")
-
-    except Exception:
-        st.info("Podés seguir usando las otras pestañas normalmente.")
+    
+    except Exception as e:
+    
+        st.error(f"ERROR TAB3: {e}")
+    
+        import traceback
+    
+        st.code(traceback.format_exc())
                     
 # --- PESTAÑA 4: CONFIGURACIÓN ---
 with tab4:
