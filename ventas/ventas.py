@@ -114,7 +114,7 @@ def obtener_coordenadas(direccion):
                 params={
                     'q': texto,
                     'format': 'json',
-                    'limit': 1,
+                    'limit': 3,
                     'countrycodes': 'ar'
                 },
                 headers=headers,
@@ -373,9 +373,9 @@ with tab3:
 
                                     if lat is not None and lon is not None:
                                         datos_a_guardar.update({"latitud": lat,"longitud": lon})
-                                        else:
-                                            st.warning(f"""⚠️ No se pudo encontrar una coordenada válida para:{datos_a_guardar['direccion_envio']}""")
-                                            continue
+                                    else:
+                                        st.warning(f"""⚠️ No se pudo encontrar una coordenada válida para:{datos_a_guardar['direccion_envio']}""")
+                                        continue
                                     
                                 supabase.table("pedidos").update(datos_a_guardar).eq("id", rid).execute()
                                 hubo_cambios = True
