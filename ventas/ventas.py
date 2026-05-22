@@ -277,9 +277,8 @@ with tab3:
     if "ids_en_ruta" not in st.session_state: st.session_state.ids_en_ruta = []
 
     try:
-        # Usamos df_pedidos asumiendo que lo declaraste de forma global como acordamos antes
-        if not df_pedidos.empty:
-            envios = df_pedidos[df_pedidos['modalidad_entrega'] == "Envio_Domicilio"].copy()
+        if pedidos_req.data:
+            envios = df[df['modalidad_entrega'] == "Envio_Domicilio"].copy()
             if not envios.empty:
                 filt = st.selectbox("Filtro Horario", ["Todos"] + sorted(list(envios['rango_horario'].dropna().unique())))
                 df_log = envios if filt == "Todos" else envios[envios['rango_horario'] == filt]
