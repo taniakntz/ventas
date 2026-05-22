@@ -88,51 +88,38 @@ def obtener_coordenadas(direccion):
     texto_normalizado = normalizar_texto(texto)
 
     # =====================================
-    # NORMALIZACIÓN
+    # NORMALIZAR DIRECCION
     # =====================================
 
     if "obera" not in texto_normalizado:
-
         texto = f"{texto}, Oberá, Misiones, Argentina"
 
     elif "argentina" not in texto_normalizado:
-
         texto = f"{texto}, Misiones, Argentina"
 
     # =====================================
-    # OPENROUTESERVICE GEOCODER
+    # PHOTON API
     # =====================================
 
-    url = (
-        "https://api.openrouteservice.org/geocode/search"
-    )
-
-    headers = {
-        "Authorization": st.secrets["ORS_API_KEY"]
-    }
+    url = "https://photon.komoot.io/api/"
 
     params = {
-        "text": texto,
-        "size": 1,
-        "boundary.country": "AR"
+        "q": texto,
+        "limit": 5
     }
 
     try:
 
         res = requests.get(
             url,
-            headers=headers,
             params=params,
             timeout=15
         )
 
-        st.write("QUERY FINAL:", texto)
-        st.write("STATUS:", res.status_code)
-
         if res.status_code != 200:
 
             st.error(
-                f"Error ORS Geocoder: {res.status_code}"
+                f"Photon HTTP {res.status_code}"
             )
 
             return None, None
@@ -143,21 +130,57 @@ def obtener_coordenadas(direccion):
 
         if not features:
 
+            st.warning(
+                f"No se encontró: {texto}"
+            )
+
             return None, None
 
-        coords = features[0]["geometry"]["coordinates"]
+        # =====================================
+        # BUSCAR RESULTADO EN OBERÁ
+        # =====================================
 
-        lon = coords[0]
-        lat = coords[1]
+        for f in features:
 
-        return lat, lon
+            coords = f["geometry"]["coordinates"]
+
+            lon = coords[0]
+            lat = coords[1]
+
+            props = f.get("properties", {})
+
+            ciudad = (
+                props.get("city", "")
+                or props.get("county", "")
+                or props.get("state", "")
+            )
+
+            ciudad_norm = normalizar_texto(ciudad)
+
+            # DEBUG
+            st.write(
+                "CANDIDATO:",
+                props.get("name", ""),
+                lat,
+                lon
+            )
+
+            # VALIDAR OBERÁ
+            if "obera" in ciudad_norm:
+
+                return lat, lon
+
+        st.warning(
+            f"No hubo resultados válidos en Oberá para: {texto}"
+        )
+
+        return None, None
 
     except Exception as e:
 
         st.error(f"ERROR GEOCODING: {e}")
 
         return None, None
-
 
 def exportar_excel(dataframe):
     output = BytesIO()
