@@ -71,48 +71,35 @@ def obtener_coordenadas(direccion):
     if not direccion or str(direccion).strip().upper() == "EMPTY": 
         return None, None
         
-    texto_original = str(direccion).strip().replace("&", "y")
+    texto = str(direccion).strip().replace("&", "y")
+    if "Oberá" not in texto: texto = f"{texto}, Oberá"
     
-    # 1. Interceptor de coordenadas crudas
-    match_coords = re.search(r'(-?\d{1,2}\.\d+)[,\s]+(-?\d{1,3}\.\d+)', texto_original)
-    if match_coords:
-        return float(match_coords.group(1)), float(match_coords.group(2))
-
+    # URL de Nominatim (OpenStreetMap)
     url = "https://nominatim.openstreetmap.org/search"
-    headers = {'User-Agent': 'PastelitosLogistica_Aprox/1.0 (contacto: admin@obera.com)'}
+    headers = {'User-Agent': 'PastelitosLogistica_Debug/1.0 (admin@obera.com)'}
+    params = {'q': texto, 'format': 'json', 'limit': 1}
     
-    # 2. INTENTO EXACTO: Busca la calle y el número de puerta
-    q_exacta = texto_original
-    if "Oberá" not in q_exacta: 
-        q_exacta += ", Oberá"
-        
     try:
-        res1 = requests.get(url, params={'q': q_exacta, 'format': 'json', 'limit': 1}, headers=headers, timeout=5)
-        if res1.status_code == 200 and len(res1.json()) > 0:
-            return float(res1.json()[0]['lat']), float(res1.json()[0]['lon'])
-            
-        # 3. INTENTO APROXIMADO: Si falló, borra los números y busca el centro de la calle
-        texto_sin_numeros = re.sub(r'\d+', '', texto_original).strip()
-        texto_sin_numeros = re.sub(r'\s+', ' ', texto_sin_numeros).replace(" ,", ",").strip()
+        # Hacemos la consulta
+        res = requests.get(url, params=params, headers=headers, timeout=10)
         
-        q_aprox = texto_sin_numeros
-        if "Oberá" not in q_aprox: 
-            q_aprox += ", Oberá"
+        # AQUÍ ESTÁ LA CLAVE: Si falla, te avisamos por qué
+        if res.status_code != 200:
+            st.error(f"Error de servidor OSM: Código {res.status_code}")
+            return None, None
             
-        time.sleep(1.5) # Pausa estricta para evitar baneo del firewall de OSM
-        res2 = requests.get(url, params={'q': q_aprox, 'format': 'json', 'limit': 1}, headers=headers, timeout=5)
-        
-        if res2.status_code == 200 and len(res2.json()) > 0:
-            lat = res2.json()[0]['lat']
-            lon = res2.json()[0]['lon']
-            # Telemetría para avisarte que tuvo que usar el punto medio
-            st.toast(f"📍 Usando ubicación aproximada (centro de calle) para: {texto_original}")
-            return float(lat), float(lon)
+        data = res.json()
+        if not data:
+            st.warning(f"La API no encontró resultados para: '{texto}'")
+            return None, None
             
-    except Exception:
-        pass 
-        
-    return None, None
+        lat = data[0]['lat']
+        lon = data[0]['lon']
+        return float(lat), float(lon)
+            
+    except Exception as e:
+        st.error(f"Fallo de conexión: {e}")
+        return None, None
     
 def exportar_excel(dataframe):
     output = BytesIO()
