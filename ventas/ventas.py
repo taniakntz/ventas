@@ -731,9 +731,8 @@ with tab3:
             
                 except Exception as e:
                     st.error(f"Error generando ruta: {e}")
-                    st.info(
-                        "Podés seguir usando las otras pestañas normalmente."
-                    )
+    except Exception:              
+        st.info("Podés seguir usando las otras pestañas normalmente.")
                     
 # --- PESTAÑA 4: CONFIGURACIÓN ---
 with tab4:
