@@ -106,9 +106,11 @@ def obtener_coordenadas(direccion):
     tiempos_espera = [2, 5, 10]
 
     for espera in tiempos_espera:
-
+    
         try:
-
+    
+            time.sleep(1)
+    
             res = requests.get(
                 url,
                 params={
@@ -379,19 +381,6 @@ with tab3:
                                     
                                 supabase.table("pedidos").update(datos_a_guardar).eq("id", rid).execute()
                                 hubo_cambios = True
-
-                    # FASE 2: Escaneo y conversión automática de registros vacíos/EMPTY
-                    pendientes = df_log[df_log['latitud'].isnull() | df_log['longitud'].isnull()]
-                    
-                    if not pendientes.empty:
-                        with st.spinner(f"Mapeando {len(pendientes)} direcciones en segundo plano..."):
-                            for idx, row in pendientes.iterrows():
-                                if str(idx) not in st_l["edited_rows"]:
-                                    lat, lon = obtener_coordenadas(row["direccion_envio"])
-                                    if lat is not None and lon is not None:
-                                        supabase.table("pedidos").update({"latitud": lat, "longitud": lon}).eq("id", row["id"]).execute()
-                                        hubo_cambios = True
-                                    time.sleep(1.2) 
 
                     if hubo_cambios:
                         st.session_state.datos_ruta_cache = None 
