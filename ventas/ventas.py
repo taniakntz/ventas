@@ -261,7 +261,7 @@ with tab2:
 # --- PESTAÑA 3: REPARTO ---
 with tab3:
     st.header("🚚 Logística")
-
+    
     try:
         if "datos_ruta_cache" not in st.session_state: st.session_state.datos_ruta_cache = None
         if "ids_en_ruta" not in st.session_state: st.session_state.ids_en_ruta = []
@@ -274,6 +274,14 @@ with tab3:
                 df_log["Incluir"] = True
                 
                 st.subheader("📍 Datos de Envío")
+                
+                # --- TELEMETRÍA 1: DIAGNÓSTICO DE COORDENADAS EN BASE DE DATOS ---
+                sin_coordenadas = df_log[df_log['latitud'].isnull() | df_log['longitud'].isnull()]
+                if not sin_coordenadas.empty:
+                    st.warning(f"⚠️ Alerta: Hay {len(sin_coordenadas)} pedidos en esta lista que NO tienen coordenadas asignadas en Supabase. Si cambiaste la dirección, asegurate de marcar la celda y pulsar el botón 'Actualizar Logística'.")
+                    with st.expander("Ver clientes sin coordenadas válidas"):
+                        st.write(sin_coordenadas[["cliente_nombre", "direccion_envio"]])
+    
                 res_log = st.data_editor(df_log[["id", "cliente_nombre", "direccion_envio", "rango_horario", "Incluir"]], 
                                          column_config={
                                              "id":None, "cliente_nombre":st.column_config.TextColumn(disabled=True),
@@ -284,12 +292,13 @@ with tab3:
                 col_l1, col_l2 = st.columns(2)
                 if col_l1.button("📍 Actualizar Logística"):
                     st_l = st.session_state["log_vfinal"]
-                    for i_s, m in st_l["edited_rows"].items():
-                        rid = df_log.iloc[int(i_s)]["id"]
-                        if "direccion_envio" in m:
-                            lat, lon = obtener_coordenadas(m["direccion_envio"])
-                            m.update({"latitud": lat, "longitud": lon})
-                        supabase.table("pedidos").update(m).eq("id", rid).execute()
+                    if st_l["edited_rows"]:
+                        for i_s, m in st_l["edited_rows"].items():
+                            rid = df_log.iloc[int(i_s)]["id"]
+                            if "direccion_envio" in m:
+                                lat, lon = obtener_coordenadas(m["direccion_envio"])
+                                m.update({"latitud": lat, "longitud": lon})
+                            supabase.table("pedidos").update(m).eq("id", rid).execute()
                     st.session_state.datos_ruta_cache = None 
                     st.rerun()
     
@@ -300,7 +309,10 @@ with tab3:
                         with st.spinner("Calculando ruta real..."):
                             ready_coords = df_log[(df_log['id'].isin(ready_ids)) & (df_log['latitud'].notnull())]
                             
-                            if len(ready_coords) >= 1:
+                            # --- TELEMETRÍA 2: VALIDACIÓN DE REQUISITO MÍNIMO ---
+                            if len(ready_coords) < 1:
+                                st.error("❌ Error de ejecución: Ninguno de los pedidos seleccionados posee coordenadas válidas (`latitud` / `longitud`) en la base de datos. El mapa no puede inicializarse en base a valores nulos.")
+                            else:
                                 origen = [-55.1089, -27.4766] 
                                 
                                 body_vrp = {
@@ -308,8 +320,10 @@ with tab3:
                                     "jobs": [{"id": i, "location": [row['longitud'], row['latitud']]} for i, (_, row) in enumerate(ready_coords.iterrows())]
                                 }
                                 headers = {"Authorization": st.secrets["ORS_API_KEY"], "Content-Type": "application/json"}
+                                
                                 res_vrp = requests.post("https://api.openrouteservice.org/optimization", json=body_vrp, headers=headers)
                                 
+                                # --- TELEMETRÍA 3: CONTROL DE EXCEPCIONES EN API VRP ---
                                 if res_vrp.status_code == 200:
                                     data_vrp = res_vrp.json()
                                     orden_coords = [origen]
@@ -325,6 +339,7 @@ with tab3:
                                     body_dir = {"coordinates": orden_coords}
                                     res_dir = requests.post("https://api.openrouteservice.org/v2/directions/driving-car/geojson", json=body_dir, headers=headers)
                                     
+                                    # --- TELEMETRÍA 4: CONTROL DE EXCEPCIONES EN API DIRECTIONS ---
                                     if res_dir.status_code == 200:
                                         st.session_state.datos_ruta_cache = {
                                             "geojson": res_dir.json(),
@@ -332,7 +347,12 @@ with tab3:
                                             "origen": [origen[1], origen[0]]
                                         }
                                         st.session_state.ids_en_ruta = ready_ids
+                                    else:
+                                        st.error(f"❌ Error HTTP {res_dir.status_code} en servicio ORS Directions: {res_dir.text}")
+                                else:
+                                    st.error(f"❌ Error HTTP {res_vrp.status_code} en servicio ORS Optimization (VRP): {res_vrp.text}")
     
+                # Renderizado condicional basado en la existencia de datos consolidados en memoria
                 if st.session_state.datos_ruta_cache:
                     cache = st.session_state.datos_ruta_cache
                     m = folium.Map(location=cache["origen"], zoom_start=14)
@@ -346,7 +366,7 @@ with tab3:
                     st_folium(m, width=800, height=500, key="mapa_reparto")
             else:
                 st.info("No hay pedidos con envío a domicilio.")
-    
+                
     except Exception as e:
         # Mostramos el error solo en esta sección
         st.error(f"Error en Envios: {e}")
