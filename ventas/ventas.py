@@ -355,116 +355,67 @@ with tab3:
                                          }, hide_index=True, key="log_vfinal")
                 
                 col_l1, col_l2 = st.columns(2)
-                
+                                
                 if col_l1.button("📍 Actualizar Logística"):
-                    st_l = st.session_state["log_vfinal"]
+                
                     hubo_cambios = False
-                    
-                    # FASE 1: Guardar modificaciones directas hechas en la tabla
-                    if st_l["edited_rows"]:
-                        for i_s, m in st_l["edited_rows"].items():
-                            rid = df_log.iloc[int(i_s)]["id"]
-                            datos_a_guardar = m.copy()
-                            
-                            if "Incluir" in datos_a_guardar:
-                                del datos_a_guardar["Incluir"]
-                            
-                            if datos_a_guardar:
-                                if "direccion_envio" in datos_a_guardar:
-                                
-                                    direccion_actual = datos_a_guardar["direccion_envio"]
-                                
-                                    if direccion_actual:
-                                
-                                        lat, lon = obtener_coordenadas(
-                                            direccion_actual
-                                        )
-                                
-                                        if lat is not None and lon is not None:
-                                
-                                            datos_a_guardar.update({
-                                                "latitud": lat,
-                                                "longitud": lon
-                                            })
-                                
-                                        else:
-                                
-                                            st.warning(
-                                                f"""
-                                                ⚠️ No se pudo localizar:
-                                
-                                                {direccion_actual}
-                                                """
-                                            )
-                                    
-                                supabase.table("pedidos").update(datos_a_guardar).eq("id", rid).execute()
-                                hubo_cambios = True
-
-                    if hubo_cambios:
-                        st.session_state.datos_ruta_cache = None 
-                        st.rerun()
-                    elif not pendientes.empty:
-                        st.warning("⚠️ El motor cartográfico no logró decodificar las nuevas direcciones. Comprobá que no contengan abreviaturas o formatos inválidos.")
-    
-                if col_l2.button("🗺️ Generar/Ver Ruta Óptima"):
-                    ready_ids = res_log[res_log['Incluir'] == True]['id'].tolist()
-                    
-                    if st.session_state.datos_ruta_cache is None or ready_ids != st.session_state.ids_en_ruta:
-                        with st.spinner("Calculando ruta real con OpenRouteService..."):
-                            ready_coords = df_log[(df_log['id'].isin(ready_ids)) & (df_log['latitud'].notnull())]
-                            
-                            if len(ready_coords) < 1:
-                                st.error("❌ No hay coordenadas asignadas en la base de datos para generar la ruta.")
+                
+                    for idx, row in res_log.iterrows():
+                
+                        rid = row["id"]
+                
+                        direccion = row["direccion_envio"]
+                
+                        rango = row["rango_horario"]
+                
+                        incluir = row["Incluir"]
+                
+                        datos_update = {
+                            "direccion_envio": direccion,
+                            "rango_horario": rango
+                        }
+                
+                        # =====================================
+                        # GEOCODING
+                        # =====================================
+                
+                        if direccion:
+                
+                            lat, lon = obtener_coordenadas(direccion)
+                
+                            if lat is not None and lon is not None:
+                
+                                datos_update.update({
+                                    "latitud": lat,
+                                    "longitud": lon
+                                })
+                
+                                st.success(
+                                    f"✅ Coordenadas encontradas para {direccion}"
+                                )
+                
                             else:
-                                origen = [-55.1089, -27.4766] 
-                                
-                                jobs_list = []
-                                map_nombres = {}
-                                for i, (_, row) in enumerate(ready_coords.iterrows()):
-                                    j_id = i + 1
-                                    map_nombres[j_id] = row['cliente_nombre']
-                                    jobs_list.append({
-                                        "id": j_id, 
-                                        "location": [float(row['longitud']), float(row['latitud'])]
-                                    })
-                                
-                                body_vrp = {
-                                    "vehicles": [{"id": 1, "profile": "driving-car", "start": origen, "end": origen}],
-                                    "jobs": jobs_list
-                                }
-                                
-                                api_key = st.secrets.get("ORS_API_KEY", "")
-                                if not api_key:
-                                    st.error("🚨 Error Crítico: No se encontró 'ORS_API_KEY' en los secretos.")
-                                else:
-                                    headers = {"Authorization": api_key, "Content-Type": "application/json"}
-                                    res_vrp = requests.post("https://api.openrouteservice.org/optimization", json=body_vrp, headers=headers)
-                                    
-                                    if res_vrp.status_code == 200:
-                                        data_vrp = res_vrp.json()
-                                        orden_coords = [origen]
-                                        info_clientes = []
-
-                                        rutas = data_vrp.get('routes', [])
-                                        if rutas:
-                                            for step in rutas[0]['steps']:
-                                                lon_s, lat_s = step['location']
-                                                orden_coords.append([lon_s, lat_s])
-                                                if step['type'] == 'job':
-                                                    c_n = map_nombres.get(step['job'], "Desconocido")
-                                                    info_clientes.append({"lat": lat_s, "lon": lon_s, "nombre": c_n})
-
-                                            body_dir = {"coordinates": orden_coords}
-                                            res_dir = requests.post("https://api.openrouteservice.org/v2/directions/driving-car/geojson", json=body_dir, headers=headers)
-                                            
-                                            if res_dir.status_code == 200:
-                                                st.session_state.datos_ruta_cache = {
-                                                    "geojson": res_dir.json(),
-                                                    "clientes": info_clientes,
-                                                    "origen": [origen[1], origen[0]] 
-                                                }
-                                                st.session_state.ids_en_ruta = ready_ids
-                                                st.rerun() 
+                
+                                st.warning(
+                                    f"⚠️ No se pudo localizar {direccion}"
+                                )
+                
+                        supabase.table("pedidos") \
+                            .update(datos_update) \
+                            .eq("id", rid) \
+                            .execute()
+                
+                        hubo_cambios = True
+                
+                        time.sleep(1)
+                
+                    if hubo_cambios:
+                
+                        st.session_state.datos_ruta_cache = None
+                
+                        st.success("✅ Logística actualizada")
+                
+                        st.rerun() 
                                             else:
                                                 st.error(f"❌ Error al trazar calles (HTTP {res_dir.status_code}): {res_dir.text}")
                                         else:
