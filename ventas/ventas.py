@@ -337,41 +337,71 @@ with tab3:
                     ready_ids = res_log[res_log['Incluir'] == True]['id'].tolist()
                     
                     if st.session_state.datos_ruta_cache is None or ready_ids != st.session_state.ids_en_ruta:
-                        with st.spinner("Calculando ruta real..."):
+                        with st.spinner("Calculando ruta real con OpenRouteService..."):
                             ready_coords = df_log[(df_log['id'].isin(ready_ids)) & (df_log['latitud'].notnull())]
                             
-                            if len(ready_coords) >= 1:
-                                origen = [-55.1089, -27.4766] 
+                            if len(ready_coords) < 1:
+                                st.error("❌ Ninguno de los pedidos seleccionados tiene Latitud/Longitud cargada en la tabla.")
+                            else:
+                                origen = [-55.1089, -27.4766] # [Longitud, Latitud] para VRP
+                                
+                                # 1. Forzamos los datos a tipos nativos y aseguramos los nombres
+                                jobs_list = []
+                                map_nombres = {}
+                                for i, (_, row) in enumerate(ready_coords.iterrows()):
+                                    j_id = i + 1
+                                    map_nombres[j_id] = row['cliente_nombre']
+                                    jobs_list.append({
+                                        "id": j_id, 
+                                        "location": [float(row['longitud']), float(row['latitud'])]
+                                    })
                                 
                                 body_vrp = {
                                     "vehicles": [{"id": 1, "profile": "driving-car", "start": origen, "end": origen}],
-                                    "jobs": [{"id": i, "location": [row['longitud'], row['latitud']]} for i, (_, row) in enumerate(ready_coords.iterrows())]
+                                    "jobs": jobs_list
                                 }
-                                headers = {"Authorization": st.secrets["ORS_API_KEY"], "Content-Type": "application/json"}
-                                res_vrp = requests.post("https://api.openrouteservice.org/optimization", json=body_vrp, headers=headers)
                                 
-                                if res_vrp.status_code == 200:
-                                    data_vrp = res_vrp.json()
-                                    orden_coords = [origen]
-                                    info_clientes = []
-    
-                                    for step in data_vrp['routes'][0]['steps']:
-                                        lon_s, lat_s = step['location']
-                                        orden_coords.append([lon_s, lat_s])
-                                        if step['type'] == 'job':
-                                            c_n = ready_coords.iloc[step['job']]['cliente_nombre']
-                                            info_clientes.append({"lat": lat_s, "lon": lon_s, "nombre": c_n})
-    
-                                    body_dir = {"coordinates": orden_coords}
-                                    res_dir = requests.post("https://api.openrouteservice.org/v2/directions/driving-car/geojson", json=body_dir, headers=headers)
+                                # 2. Verificamos explícitamente la llave de la API
+                                api_key = st.secrets.get("ORS_API_KEY", "")
+                                if not api_key:
+                                    st.error("🚨 Error Crítico: No se encontró 'ORS_API_KEY' en tus secretos (.streamlit/secrets.toml).")
+                                else:
+                                    headers = {"Authorization": api_key, "Content-Type": "application/json"}
+                                    res_vrp = requests.post("https://api.openrouteservice.org/optimization", json=body_vrp, headers=headers)
                                     
-                                    if res_dir.status_code == 200:
-                                        st.session_state.datos_ruta_cache = {
-                                            "geojson": res_dir.json(),
-                                            "clientes": info_clientes,
-                                            "origen": [origen[1], origen[0]]
-                                        }
-                                        st.session_state.ids_en_ruta = ready_ids
+                                    # 3. Control de Errores Restablecido
+                                    if res_vrp.status_code == 200:
+                                        data_vrp = res_vrp.json()
+                                        orden_coords = [origen]
+                                        info_clientes = []
+
+                                        rutas = data_vrp.get('routes', [])
+                                        if rutas:
+                                            for step in rutas[0]['steps']:
+                                                lon_s, lat_s = step['location']
+                                                orden_coords.append([lon_s, lat_s])
+                                                if step['type'] == 'job':
+                                                    # Recuperamos el nombre usando nuestro mapeo seguro
+                                                    c_n = map_nombres.get(step['job'], "Desconocido")
+                                                    info_clientes.append({"lat": lat_s, "lon": lon_s, "nombre": c_n})
+
+                                            body_dir = {"coordinates": orden_coords}
+                                            res_dir = requests.post("https://api.openrouteservice.org/v2/directions/driving-car/geojson", json=body_dir, headers=headers)
+                                            
+                                            if res_dir.status_code == 200:
+                                                st.session_state.datos_ruta_cache = {
+                                                    "geojson": res_dir.json(),
+                                                    "clientes": info_clientes,
+                                                    "origen": [origen[1], origen[0]] # [Lat, Lon] para que Folium lo dibuje bien
+                                                }
+                                                st.session_state.ids_en_ruta = ready_ids
+                                                st.rerun() # Forzamos recarga para que el mapa aparezca de inmediato
+                                            else:
+                                                st.error(f"❌ Error al trazar las calles (HTTP {res_dir.status_code}): {res_dir.text}")
+                                        else:
+                                            st.error("⚠️ La API funcionó, pero no devolvió ninguna ruta válida.")
+                                    else:
+                                        st.error(f"❌ Error de OpenRouteService (HTTP {res_vrp.status_code}): {res_vrp.text}")
     
                 if st.session_state.datos_ruta_cache:
                     cache = st.session_state.datos_ruta_cache
@@ -390,6 +420,7 @@ with tab3:
         # Mostramos el error solo en esta sección
         st.error(f"Error en Reparto: {e}")
         st.info("Podés seguir usando las otras pestañas normalmente.")
+
 # --- PESTAÑA 4: CONFIGURACIÓN ---
 with tab4:
     st.header("⚙️ Gestión de Campañas")
