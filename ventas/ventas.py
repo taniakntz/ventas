@@ -114,7 +114,7 @@ def obtener_coordenadas(direccion):
         
     return None, None
     
-    def exportar_excel(dataframe):
+def exportar_excel(dataframe):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         dataframe.to_excel(writer, index=False, sheet_name='Ventas')
