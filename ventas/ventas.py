@@ -548,7 +548,179 @@ with tab3:
                 st.info(
                     "No hay pedidos con envío a domicilio."
                 )
-
+            # =====================================
+            # GENERAR RUTA OPTIMA
+            # =====================================
+            
+            if col_l2.button("🗺️ Generar/Ver Ruta Óptima"):
+            
+                ready = df_log[
+                    (df_log["Incluir"] == True)
+                ]
+            
+                if ready.empty:
+            
+                    st.warning(
+                        "⚠️ No hay pedidos seleccionados."
+                    )
+            
+                else:
+            
+                    ready_ids = ready["id"].tolist()
+            
+                    origen = [-55.1194, -27.4872]
+            
+                    jobs = []
+            
+                    map_nombres = {}
+            
+                    for i, (_, row) in enumerate(
+                        ready.iterrows(),
+                        start=1
+                    ):
+            
+                        pedido_db = df[
+                            df["id"] == row["id"]
+                        ].iloc[0]
+            
+                        lat = pedido_db["latitud"]
+                        lon = pedido_db["longitud"]
+            
+                        if pd.notna(lat) and pd.notna(lon):
+            
+                            jobs.append({
+                                "id": i,
+                                "location": [lon, lat]
+                            })
+            
+                            map_nombres[i] = row[
+                                "cliente_nombre"
+                            ]
+            
+                    if not jobs:
+            
+                        st.error(
+                            "⚠️ Ningún pedido tiene coordenadas válidas."
+                        )
+            
+                    else:
+            
+                        body_vrp = {
+                            "jobs": jobs,
+                            "vehicles": [{
+                                "id": 1,
+                                "profile": "driving-car",
+                                "start": origen,
+                                "end": origen
+                            }]
+                        }
+            
+                        headers = {
+                            "Authorization":
+                                st.secrets["ORS_API_KEY"],
+                            "Content-Type":
+                                "application/json"
+                        }
+            
+                        res_vrp = requests.post(
+                            "https://api.openrouteservice.org/optimization",
+                            json=body_vrp,
+                            headers=headers
+                        )
+            
+                        if res_vrp.status_code == 200:
+            
+                            data_vrp = res_vrp.json()
+            
+                            orden_coords = [origen]
+            
+                            info_clientes = []
+            
+                            rutas = data_vrp.get(
+                                'routes',
+                                []
+                            )
+            
+                            if rutas:
+            
+                                for step in rutas[0]['steps']:
+            
+                                    lon_s, lat_s = step[
+                                        'location'
+                                    ]
+            
+                                    orden_coords.append(
+                                        [lon_s, lat_s]
+                                    )
+            
+                                    if step['type'] == 'job':
+            
+                                        c_n = map_nombres.get(
+                                            step['job'],
+                                            "Desconocido"
+                                        )
+            
+                                        info_clientes.append({
+                                            "lat": lat_s,
+                                            "lon": lon_s,
+                                            "nombre": c_n
+                                        })
+            
+                                body_dir = {
+                                    "coordinates": orden_coords
+                                }
+            
+                                res_dir = requests.post(
+                                    "https://api.openrouteservice.org/v2/directions/driving-car/geojson",
+                                    json=body_dir,
+                                    headers=headers
+                                )
+            
+                                if res_dir.status_code == 200:
+            
+                                    st.session_state.datos_ruta_cache = {
+                                        "geojson": res_dir.json(),
+                                        "clientes": info_clientes,
+                                        "origen": [
+                                            origen[1],
+                                            origen[0]
+                                        ]
+                                    }
+            
+                                    st.session_state.ids_en_ruta = ready_ids
+            
+                                    st.rerun()
+            
+                                else:
+            
+                                    st.error(
+                                        f"""
+                                        ❌ Error al trazar calles
+                                        (HTTP {res_dir.status_code}):
+            
+                                        {res_dir.text}
+                                        """
+                                    )
+            
+                            else:
+            
+                                st.error(
+                                    """
+                                    ⚠️ La API de optimización no pudo
+                                    generar una ruta coherente.
+                                    """
+                                )
+            
+                        else:
+            
+                            st.error(
+                                f"""
+                                ❌ Error de OpenRouteService
+                                (HTTP {res_vrp.status_code}):
+            
+                                {res_vrp.text}
+                                """
+                            )
     except Exception as e:
 
         st.error(f"Error en Reparto: {e}")
