@@ -333,112 +333,229 @@ with tab2:
 
 # --- PESTAÑA 3: REPARTO ---
 with tab3:
+
     st.header("🚚 Logística")
 
     try:
-        if "datos_ruta_cache" not in st.session_state: st.session_state.datos_ruta_cache = None
-        if "ids_en_ruta" not in st.session_state: st.session_state.ids_en_ruta = []
-    
+
+        if "datos_ruta_cache" not in st.session_state:
+            st.session_state.datos_ruta_cache = None
+
+        if "ids_en_ruta" not in st.session_state:
+            st.session_state.ids_en_ruta = []
+
         if pedidos_req.data:
-            envios = df[df['modalidad_entrega'] == "Envio_Domicilio"].copy()
+
+            envios = df[
+                df['modalidad_entrega'] == "Envio_Domicilio"
+            ].copy()
+
             if not envios.empty:
-                filt = st.selectbox("Filtro Horario", ["Todos"] + sorted(list(envios['rango_horario'].dropna().unique())))
-                df_log = envios if filt == "Todos" else envios[envios['rango_horario'] == filt]
+
+                filt = st.selectbox(
+                    "Filtro Horario",
+                    ["Todos"] + sorted(
+                        list(envios['rango_horario'].dropna().unique())
+                    )
+                )
+
+                df_log = (
+                    envios
+                    if filt == "Todos"
+                    else envios[
+                        envios['rango_horario'] == filt
+                    ]
+                )
+
                 df_log["Incluir"] = True
-                
+
                 st.subheader("📍 Datos de Envío")
-                res_log = st.data_editor(df_log[["id", "cliente_nombre", "direccion_envio", "rango_horario", "Incluir"]], 
-                                         column_config={
-                                             "id":None, "cliente_nombre":st.column_config.TextColumn("Cliente", disabled=True),
-                                             "Incluir": st.column_config.CheckboxColumn("Incluir", default=True),
-                                             "rango_horario":st.column_config.SelectboxColumn("Horario", options=["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"])
-                                         }, hide_index=True, key="log_vfinal")
-                
+
+                res_log = st.data_editor(
+
+                    df_log[
+                        [
+                            "id",
+                            "cliente_nombre",
+                            "direccion_envio",
+                            "rango_horario",
+                            "Incluir"
+                        ]
+                    ],
+
+                    column_config={
+
+                        "id": None,
+
+                        "cliente_nombre":
+                            st.column_config.TextColumn(
+                                "Cliente",
+                                disabled=True
+                            ),
+
+                        "Incluir":
+                            st.column_config.CheckboxColumn(
+                                "Incluir",
+                                default=True
+                            ),
+
+                        "rango_horario":
+                            st.column_config.SelectboxColumn(
+                                "Horario",
+                                options=[
+                                    "08:00-09:00",
+                                    "09:00-10:00",
+                                    "10:00-11:00",
+                                    "11:00-12:00",
+                                    "12:00-13:00"
+                                ]
+                            )
+                    },
+
+                    hide_index=True,
+                    key="log_vfinal"
+                )
+
                 col_l1, col_l2 = st.columns(2)
-                                
+
+                # =====================================
+                # ACTUALIZAR LOGISTICA
+                # =====================================
+
                 if col_l1.button("📍 Actualizar Logística"):
-                
+
                     hubo_cambios = False
-                
+
                     for idx, row in res_log.iterrows():
-                
+
                         rid = row["id"]
-                
+
                         direccion = row["direccion_envio"]
-                
+
                         rango = row["rango_horario"]
-                
-                        incluir = row["Incluir"]
-                
+
                         datos_update = {
                             "direccion_envio": direccion,
                             "rango_horario": rango
                         }
-                
+
                         # =====================================
                         # GEOCODING
                         # =====================================
-                
+
                         if direccion:
-                
-                            lat, lon = obtener_coordenadas(direccion)
-                
-                            if lat is not None and lon is not None:
-                
+
+                            lat, lon = obtener_coordenadas(
+                                direccion
+                            )
+
+                            if (
+                                lat is not None
+                                and
+                                lon is not None
+                            ):
+
                                 datos_update.update({
                                     "latitud": lat,
                                     "longitud": lon
                                 })
-                
+
                                 st.success(
-                                    f"✅ Coordenadas encontradas para {direccion}"
+                                    f"""
+                                    ✅ Coordenadas encontradas para:
+
+                                    {direccion}
+                                    """
                                 )
-                
+
                             else:
-                
+
                                 st.warning(
-                                    f"⚠️ No se pudo localizar {direccion}"
+                                    f"""
+                                    ⚠️ No se pudo localizar:
+
+                                    {direccion}
+                                    """
                                 )
-                
+
                         supabase.table("pedidos") \
                             .update(datos_update) \
                             .eq("id", rid) \
                             .execute()
-                
+
                         hubo_cambios = True
-                
+
                         time.sleep(1)
-                
+
                     if hubo_cambios:
-                
+
                         st.session_state.datos_ruta_cache = None
-                
-                        st.success("✅ Logística actualizada")
-                
-                        st.rerun() 
-                    else:
-                        st.error(f"❌ Error al trazar calles (HTTP {res_dir.status_code}): {res_dir.text}")
-                else:
-                    st.error("⚠️ La API de optimización no pudo trazar un trayecto coherente con esos puntos.")
-            else:
-                st.error(f"❌ Error de OpenRouteService (HTTP {res_vrp.status_code}): {res_vrp.text}")
-    
+
+                        st.success(
+                            "✅ Logística actualizada"
+                        )
+
+                        st.rerun()
+
+                # =====================================
+                # ACA SIGUE EL BOTON DE RUTA
+                # =====================================
+
                 if st.session_state.datos_ruta_cache:
+
                     cache = st.session_state.datos_ruta_cache
-                    m = folium.Map(location=cache["origen"], zoom_start=14)
-                    folium.Marker(cache["origen"], popup="LOCAL", icon=folium.Icon(color="green", icon="home")).add_to(m)
-                    
+
+                    m = folium.Map(
+                        location=cache["origen"],
+                        zoom_start=14
+                    )
+
+                    folium.Marker(
+                        cache["origen"],
+                        popup="LOCAL",
+                        icon=folium.Icon(
+                            color="green",
+                            icon="home"
+                        )
+                    ).add_to(m)
+
                     for c in cache["clientes"]:
-                        folium.Marker([c["lat"], c["lon"]], popup=f"Cliente: {c['nombre']}", icon=folium.Icon(color="red")).add_to(m)
-                    
-                    folium.GeoJson(cache["geojson"], style_function=lambda x: {'color': 'blue', 'weight': 5, 'opacity': 0.7}).add_to(m)
-                    st_folium(m, width=800, height=500, key="mapa_reparto")
+
+                        folium.Marker(
+                            [c["lat"], c["lon"]],
+                            popup=f"Cliente: {c['nombre']}",
+                            icon=folium.Icon(color="red")
+                        ).add_to(m)
+
+                    folium.GeoJson(
+                        cache["geojson"],
+                        style_function=lambda x: {
+                            'color': 'blue',
+                            'weight': 5,
+                            'opacity': 0.7
+                        }
+                    ).add_to(m)
+
+                    st_folium(
+                        m,
+                        width=800,
+                        height=500,
+                        key="mapa_reparto"
+                    )
+
             else:
-                st.info("No hay pedidos con envío a domicilio.")
+
+                st.info(
+                    "No hay pedidos con envío a domicilio."
+                )
+
     except Exception as e:
+
         st.error(f"Error en Reparto: {e}")
-        st.info("Podés seguir usando las otras pestañas normalmente.")
-        
+
+        st.info(
+            "Podés seguir usando las otras pestañas normalmente."
+        )
 # --- PESTAÑA 4: CONFIGURACIÓN ---
 with tab4:
     st.header("⚙️ Gestión de Campañas")
