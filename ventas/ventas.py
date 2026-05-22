@@ -481,12 +481,29 @@ with tab3:
                                     """
                                 )
 
+                        # =====================================
+                        # LIMPIAR NaN PARA SUPABASE
+                        # =====================================
+                        
+                        datos_update = {
+                            k: (
+                                None
+                                if pd.isna(v)
+                                else v
+                            )
+                            for k, v in datos_update.items()
+                        }
+
                         st.write(datos_update)
                         
                         supabase.table("pedidos") \
                             .update(datos_update) \
                             .eq("id", rid) \
                             .execute()
+                        
+                        st.write("RESPUESTA SUPABASE:", response)
+
+                        st.success(f"UPDATE OK ID {rid}")
 
                         hubo_cambios = True
 
