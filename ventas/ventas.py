@@ -68,13 +68,36 @@ def calcular_total(batata, membrillo, precio_doc, precio_med):
     return total
 
 def obtener_coordenadas(direccion):
-    url = f"https://nominatim.openstreetmap.org/search?q={direccion}&format=json&limit=1"
+    if not direccion: return None, None
+    
+    texto = str(direccion).replace("&", "y").strip()
+    if "Oberá" not in texto: texto = f"{texto}, Oberá"
+    if "Misiones" not in texto: texto = f"{texto}, Misiones, Argentina"
+    
     headers = {'User-Agent': 'PastelitosApp/1.0'}
+    
     try:
-        res = requests.get(url, headers=headers)
+        # TIMEOUT CRÍTICO de 5 segundos para evitar el bucle infinito
+        url = f"https://nominatim.openstreetmap.org/search?q={texto}&format=json&limit=1"
+        res = requests.get(url, headers=headers, timeout=5)
         if res.status_code == 200 and len(res.json()) > 0:
             return float(res.json()[0]['lat']), float(res.json()[0]['lon'])
-    except: pass
+            
+        # Fallback sin números y pacing para asegurar tasa de acierto
+        texto_sin_numeros = re.sub(r'\d+', '', texto).strip()
+        texto_sin_numeros = re.sub(r'\s+', ' ', texto_sin_numeros)
+        
+        time.sleep(1.5)
+        url_fall = f"https://nominatim.openstreetmap.org/search?q={texto_sin_numeros}&format=json&limit=1"
+        res_fall = requests.get(url_fall, headers=headers, timeout=5)
+        
+        if res_fall.status_code == 200 and len(res_fall.json()) > 0:
+            return float(res_fall.json()[0]['lat']), float(res_fall.json()[0]['lon'])
+            
+    except Exception:
+        # Pasa en silencio y libera la UI si el servidor se cae
+        pass 
+        
     return None, None
     
 def exportar_excel(dataframe):
@@ -249,7 +272,7 @@ with tab2:
                     st_g = st.session_state["g_ed"]
                     for i_s, m in st_g["edited_rows"].items():
                         rid = df_gastos.iloc[int(i_s)]["id"]
-                        if "fecha_registro" in m: m["fecha_registro"] = str(m["fecha_registro"])
+                        if "fecha_registro" in m: m m["fecha_registro"] = str(m["fecha_registro"])
                         supabase.table("gastos").update(m).eq("id", rid).execute()
                     for i in st_g["deleted_rows"]:
                         supabase.table("gastos").delete().eq("id", df_gastos.iloc[i]["id"]).execute()
@@ -296,17 +319,19 @@ with tab3:
                         if "Incluir" in datos_a_guardar:
                             del datos_a_guardar["Incluir"]
                         
-                        # 3. Solo operamos si quedaron datos reales (ej: si se editó la dirección o el horario)
+                        # 3. Solo operamos si quedaron datos reales
                         if datos_a_guardar:
                             if "direccion_envio" in datos_a_guardar:
                                 lat, lon = obtener_coordenadas(datos_a_guardar["direccion_envio"])
-                                datos_a_guardar.update({"latitud": lat, "longitud": lon})
+                                # CONDICIONAL DE SEGURIDAD: Solo se adjunta si la API trajo datos
+                                if lat is not None and lon is not None:
+                                    datos_a_guardar.update({"latitud": lat, "longitud": lon})
                                 
                             # Actualización limpia hacia Supabase
                             supabase.table("pedidos").update(datos_a_guardar).eq("id", rid).execute()
                             
-                st.session_state.datos_ruta_cache = None 
-                st.rerun()
+                    st.session_state.datos_ruta_cache = None 
+                    st.rerun()
     
                 if col_l2.button("🗺️ Generar/Ver Ruta Óptima"):
                     ready_ids = res_log[res_log['Incluir'] == True]['id'].tolist()
