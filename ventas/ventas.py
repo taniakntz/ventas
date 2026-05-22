@@ -288,12 +288,25 @@ with tab3:
                     st_l = st.session_state["log_vfinal"]
                     for i_s, m in st_l["edited_rows"].items():
                         rid = df_log.iloc[int(i_s)]["id"]
-                        if "direccion_envio" in m:
-                            lat, lon = obtener_coordenadas(m["direccion_envio"])
-                            m.update({"latitud": lat, "longitud": lon})
-                        supabase.table("pedidos").update(m).eq("id", rid).execute()
-                    st.session_state.datos_ruta_cache = None 
-                    st.rerun()
+                        
+                        # 1. Creamos una copia de las modificaciones
+                        datos_a_guardar = m.copy()
+                        
+                        # 2. Eliminamos la columna virtual de la interfaz
+                        if "Incluir" in datos_a_guardar:
+                            del datos_a_guardar["Incluir"]
+                        
+                        # 3. Solo operamos si quedaron datos reales (ej: si se editó la dirección o el horario)
+                        if datos_a_guardar:
+                            if "direccion_envio" in datos_a_guardar:
+                                lat, lon = obtener_coordenadas(datos_a_guardar["direccion_envio"])
+                                datos_a_guardar.update({"latitud": lat, "longitud": lon})
+                                
+                            # Actualización limpia hacia Supabase
+                            supabase.table("pedidos").update(datos_a_guardar).eq("id", rid).execute()
+                            
+                st.session_state.datos_ruta_cache = None 
+                st.rerun()
     
                 if col_l2.button("🗺️ Generar/Ver Ruta Óptima"):
                     ready_ids = res_log[res_log['Incluir'] == True]['id'].tolist()
