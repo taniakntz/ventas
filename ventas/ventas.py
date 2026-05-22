@@ -493,16 +493,16 @@ with tab3:
                             )
                             for k, v in datos_update.items()
                         }
-
-                        st.write(datos_update)
                         
-                        supabase.table("pedidos") \
+                        st.write("UPDATE:", datos_update)
+                        
+                        response = supabase.table("pedidos") \
                             .update(datos_update) \
                             .eq("id", rid) \
                             .execute()
                         
                         st.write("RESPUESTA SUPABASE:", response)
-
+                        
                         st.success(f"UPDATE OK ID {rid}")
 
                         hubo_cambios = True
