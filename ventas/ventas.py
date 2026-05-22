@@ -74,32 +74,34 @@ def obtener_coordenadas(direccion):
     texto = str(direccion).strip().replace("&", "y")
     if "Oberá" not in texto: texto = f"{texto}, Oberá"
     
-    # URL de Nominatim (OpenStreetMap)
     url = "https://nominatim.openstreetmap.org/search"
-    headers = {'User-Agent': 'PastelitosLogistica_Debug/1.0 (admin@obera.com)'}
-    params = {'q': texto, 'format': 'json', 'limit': 1}
+    headers = {'User-Agent': 'PastelitosLogistica_Pro_v10 (contacto: admin@obera.com)'}
     
-    try:
-        # Hacemos la consulta
-        res = requests.get(url, params=params, headers=headers, timeout=10)
-        
-        # AQUÍ ESTÁ LA CLAVE: Si falla, te avisamos por qué
-        if res.status_code != 200:
-            st.error(f"Error de servidor OSM: Código {res.status_code}")
-            return None, None
+    # Lista de intentos con tiempos de espera progresivos
+    tiempos_espera = [2, 5, 10] 
+    
+    for espera in tiempos_espera:
+        try:
+            res = requests.get(url, params={'q': texto, 'format': 'json', 'limit': 1}, headers=headers, timeout=10)
             
-        data = res.json()
-        if not data:
-            st.warning(f"La API no encontró resultados para: '{texto}'")
-            return None, None
+            if res.status_code == 200:
+                data = res.json()
+                if data:
+                    return float(data[0]['lat']), float(data[0]['lon'])
+                else:
+                    return None, None # No encontró la calle, no tiene sentido reintentar
             
-        lat = data[0]['lat']
-        lon = data[0]['lon']
-        return float(lat), float(lon)
+            elif res.status_code == 429:
+                st.toast(f"Servidor saturado. Esperando {espera} segundos...")
+                time.sleep(espera) # Pausa estratégica antes de reintentar
+                continue
+            else:
+                break # Otro error (403, 500), no reintentar
+                
+        except Exception:
+            time.sleep(espera)
             
-    except Exception as e:
-        st.error(f"Fallo de conexión: {e}")
-        return None, None
+    return None, None
     
 def exportar_excel(dataframe):
     output = BytesIO()
