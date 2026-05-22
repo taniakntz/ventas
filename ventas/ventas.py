@@ -218,144 +218,164 @@ with tab1:
 # --- PESTAÑA 2: FINANZAS ---
 with tab2:
     st.header("📈 Balance")
-    if pedidos_req.data:
-        ing = df[df['estado_pago'] == 'Pagado']['total_calculado'].sum()
-        gas_res = supabase.table("gastos").select("*").eq("campana_id", ID_CAMPANA).execute()
-        df_gastos = pd.DataFrame(gas_res.data) if gas_res.data else pd.DataFrame()
-        gas_tot = df_gastos['monto'].sum() if not df_gastos.empty else 0
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Ingresos", f"${ing:,.2f}")
-        c2.metric("Gastos", f"${gas_tot:,.2f}")
-        c3.metric("Neto", f"${ing - gas_tot:,.2f}")
-
-        st.divider()
-        st.subheader("➕ Nuevo Gasto")
-        with st.form("g_form", clear_on_submit=True):
-            g_desc = st.text_input("Descripción")
-            g_mont = st.number_input("Monto", 0.0, step=100.0)
-            if st.form_submit_button("Registrar"):
-                supabase.table("gastos").insert({"campana_id": ID_CAMPANA, "descripcion": g_desc, "monto": g_mont, "fecha_registro": str(date.today())}).execute()
-                st.rerun()
-        
-        if not df_gastos.empty:
-            st.subheader("📋 Detalle de Gastos")
-            df_gastos["monto"] = pd.to_numeric(df_gastos["monto"])
-            df_gastos["fecha_registro"] = pd.to_datetime(df_gastos["fecha_registro"]).dt.date
-            ed_g = st.data_editor(df_gastos[["id", "descripcion", "monto", "fecha_registro"]], column_config={"id": None}, num_rows="dynamic", hide_index=True, key="g_ed")
-            if st.button("💾 Guardar Gastos"):
-                st_g = st.session_state["g_ed"]
-                for i_s, m in st_g["edited_rows"].items():
-                    rid = df_gastos.iloc[int(i_s)]["id"]
-                    if "fecha_registro" in m: m["fecha_registro"] = str(m["fecha_registro"])
-                    supabase.table("gastos").update(m).eq("id", rid).execute()
-                for i in st_g["deleted_rows"]:
-                    supabase.table("gastos").delete().eq("id", df_gastos.iloc[i]["id"]).execute()
-                st.rerun()
+    try:
+        if pedidos_req.data:
+            ing = df[df['estado_pago'] == 'Pagado']['total_calculado'].sum()
+            gas_res = supabase.table("gastos").select("*").eq("campana_id", ID_CAMPANA).execute()
+            df_gastos = pd.DataFrame(gas_res.data) if gas_res.data else pd.DataFrame()
+            gas_tot = df_gastos['monto'].sum() if not df_gastos.empty else 0
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Ingresos", f"${ing:,.2f}")
+            c2.metric("Gastos", f"${gas_tot:,.2f}")
+            c3.metric("Neto", f"${ing - gas_tot:,.2f}")
+    
+            st.divider()
+            st.subheader("➕ Nuevo Gasto")
+            with st.form("g_form", clear_on_submit=True):
+                g_desc = st.text_input("Descripción")
+                g_mont = st.number_input("Monto", 0.0, step=100.0)
+                if st.form_submit_button("Registrar"):
+                    supabase.table("gastos").insert({"campana_id": ID_CAMPANA, "descripcion": g_desc, "monto": g_mont, "fecha_registro": str(date.today())}).execute()
+                    st.rerun()
+            
+            if not df_gastos.empty:
+                st.subheader("📋 Detalle de Gastos")
+                df_gastos["monto"] = pd.to_numeric(df_gastos["monto"])
+                df_gastos["fecha_registro"] = pd.to_datetime(df_gastos["fecha_registro"]).dt.date
+                ed_g = st.data_editor(df_gastos[["id", "descripcion", "monto", "fecha_registro"]], column_config={"id": None}, num_rows="dynamic", hide_index=True, key="g_ed")
+                if st.button("💾 Guardar Gastos"):
+                    st_g = st.session_state["g_ed"]
+                    for i_s, m in st_g["edited_rows"].items():
+                        rid = df_gastos.iloc[int(i_s)]["id"]
+                        if "fecha_registro" in m: m["fecha_registro"] = str(m["fecha_registro"])
+                        supabase.table("gastos").update(m).eq("id", rid).execute()
+                    for i in st_g["deleted_rows"]:
+                        supabase.table("gastos").delete().eq("id", df_gastos.iloc[i]["id"]).execute()
+                    st.rerun()
+                    
+    except Exception as e:
+        # Mostramos el error solo en esta sección
+        st.error(f"Error en Balance: {e}")
+        st.info("Podés seguir usando las otras pestañas normalmente.")
 
 # --- PESTAÑA 3: REPARTO ---
 with tab3:
     st.header("🚚 Logística")
-    if "datos_ruta_cache" not in st.session_state: st.session_state.datos_ruta_cache = None
-    if "ids_en_ruta" not in st.session_state: st.session_state.ids_en_ruta = []
 
-    if pedidos_req.data:
-        envios = df[df['modalidad_entrega'] == "Envio_Domicilio"].copy()
-        if not envios.empty:
-            filt = st.selectbox("Filtro Horario", ["Todos"] + sorted(list(envios['rango_horario'].dropna().unique())))
-            df_log = envios if filt == "Todos" else envios[envios['rango_horario'] == filt]
-            df_log["Incluir"] = True
-            
-            st.subheader("📍 Datos de Envío")
-            res_log = st.data_editor(df_log[["id", "cliente_nombre", "direccion_envio", "rango_horario", "Incluir"]], 
-                                     column_config={
-                                         "id":None, "cliente_nombre":st.column_config.TextColumn(disabled=True),
-                                         "Incluir": st.column_config.CheckboxColumn("Incluir", default=True),
-                                         "rango_horario":st.column_config.SelectboxColumn("Horario", options=["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"])
-                                     }, hide_index=True, key="log_vfinal")
-            
-            col_l1, col_l2 = st.columns(2)
-            if col_l1.button("📍 Actualizar Logística"):
-                st_l = st.session_state["log_vfinal"]
-                for i_s, m in st_l["edited_rows"].items():
-                    rid = df_log.iloc[int(i_s)]["id"]
-                    if "direccion_envio" in m:
-                        lat, lon = obtener_coordenadas(m["direccion_envio"])
-                        m.update({"latitud": lat, "longitud": lon})
-                    supabase.table("pedidos").update(m).eq("id", rid).execute()
-                st.session_state.datos_ruta_cache = None 
-                st.rerun()
-
-            if col_l2.button("🗺️ Generar/Ver Ruta Óptima"):
-                ready_ids = res_log[res_log['Incluir'] == True]['id'].tolist()
+    try:
+        if "datos_ruta_cache" not in st.session_state: st.session_state.datos_ruta_cache = None
+        if "ids_en_ruta" not in st.session_state: st.session_state.ids_en_ruta = []
+    
+        if pedidos_req.data:
+            envios = df[df['modalidad_entrega'] == "Envio_Domicilio"].copy()
+            if not envios.empty:
+                filt = st.selectbox("Filtro Horario", ["Todos"] + sorted(list(envios['rango_horario'].dropna().unique())))
+                df_log = envios if filt == "Todos" else envios[envios['rango_horario'] == filt]
+                df_log["Incluir"] = True
                 
-                if st.session_state.datos_ruta_cache is None or ready_ids != st.session_state.ids_en_ruta:
-                    with st.spinner("Calculando ruta real..."):
-                        ready_coords = df_log[(df_log['id'].isin(ready_ids)) & (df_log['latitud'].notnull())]
-                        
-                        if len(ready_coords) >= 1:
-                            origen = [-55.1089, -27.4766] 
+                st.subheader("📍 Datos de Envío")
+                res_log = st.data_editor(df_log[["id", "cliente_nombre", "direccion_envio", "rango_horario", "Incluir"]], 
+                                         column_config={
+                                             "id":None, "cliente_nombre":st.column_config.TextColumn(disabled=True),
+                                             "Incluir": st.column_config.CheckboxColumn("Incluir", default=True),
+                                             "rango_horario":st.column_config.SelectboxColumn("Horario", options=["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"])
+                                         }, hide_index=True, key="log_vfinal")
+                
+                col_l1, col_l2 = st.columns(2)
+                if col_l1.button("📍 Actualizar Logística"):
+                    st_l = st.session_state["log_vfinal"]
+                    for i_s, m in st_l["edited_rows"].items():
+                        rid = df_log.iloc[int(i_s)]["id"]
+                        if "direccion_envio" in m:
+                            lat, lon = obtener_coordenadas(m["direccion_envio"])
+                            m.update({"latitud": lat, "longitud": lon})
+                        supabase.table("pedidos").update(m).eq("id", rid).execute()
+                    st.session_state.datos_ruta_cache = None 
+                    st.rerun()
+    
+                if col_l2.button("🗺️ Generar/Ver Ruta Óptima"):
+                    ready_ids = res_log[res_log['Incluir'] == True]['id'].tolist()
+                    
+                    if st.session_state.datos_ruta_cache is None or ready_ids != st.session_state.ids_en_ruta:
+                        with st.spinner("Calculando ruta real..."):
+                            ready_coords = df_log[(df_log['id'].isin(ready_ids)) & (df_log['latitud'].notnull())]
                             
-                            body_vrp = {
-                                "vehicles": [{"id": 1, "profile": "driving-car", "start": origen, "end": origen}],
-                                "jobs": [{"id": i, "location": [row['longitud'], row['latitud']]} for i, (_, row) in enumerate(ready_coords.iterrows())]
-                            }
-                            headers = {"Authorization": st.secrets["ORS_API_KEY"], "Content-Type": "application/json"}
-                            res_vrp = requests.post("https://api.openrouteservice.org/optimization", json=body_vrp, headers=headers)
-                            
-                            if res_vrp.status_code == 200:
-                                data_vrp = res_vrp.json()
-                                orden_coords = [origen]
-                                info_clientes = []
-
-                                for step in data_vrp['routes'][0]['steps']:
-                                    lon_s, lat_s = step['location']
-                                    orden_coords.append([lon_s, lat_s])
-                                    if step['type'] == 'job':
-                                        c_n = ready_coords.iloc[step['job']]['cliente_nombre']
-                                        info_clientes.append({"lat": lat_s, "lon": lon_s, "nombre": c_n})
-
-                                body_dir = {"coordinates": orden_coords}
-                                res_dir = requests.post("https://api.openrouteservice.org/v2/directions/driving-car/geojson", json=body_dir, headers=headers)
+                            if len(ready_coords) >= 1:
+                                origen = [-55.1089, -27.4766] 
                                 
-                                if res_dir.status_code == 200:
-                                    st.session_state.datos_ruta_cache = {
-                                        "geojson": res_dir.json(),
-                                        "clientes": info_clientes,
-                                        "origen": [origen[1], origen[0]]
-                                    }
-                                    st.session_state.ids_en_ruta = ready_ids
-
-            if st.session_state.datos_ruta_cache:
-                cache = st.session_state.datos_ruta_cache
-                m = folium.Map(location=cache["origen"], zoom_start=14)
-                folium.Marker(cache["origen"], popup="LOCAL", icon=folium.Icon(color="green", icon="home")).add_to(m)
-                
-                for c in cache["clientes"]:
-                    folium.Marker([c["lat"], c["lon"]], popup=f"Cliente: {c['nombre']}", icon=folium.Icon(color="red")).add_to(m)
-                
-                folium.GeoJson(cache["geojson"], style_function=lambda x: {'color': 'blue', 'weight': 5, 'opacity': 0.7}).add_to(m)
-                
-                st_folium(m, width=800, height=500, key="mapa_reparto")
-        else:
-            st.info("No hay pedidos con envío a domicilio.")
-            
+                                body_vrp = {
+                                    "vehicles": [{"id": 1, "profile": "driving-car", "start": origen, "end": origen}],
+                                    "jobs": [{"id": i, "location": [row['longitud'], row['latitud']]} for i, (_, row) in enumerate(ready_coords.iterrows())]
+                                }
+                                headers = {"Authorization": st.secrets["ORS_API_KEY"], "Content-Type": "application/json"}
+                                res_vrp = requests.post("https://api.openrouteservice.org/optimization", json=body_vrp, headers=headers)
+                                
+                                if res_vrp.status_code == 200:
+                                    data_vrp = res_vrp.json()
+                                    orden_coords = [origen]
+                                    info_clientes = []
+    
+                                    for step in data_vrp['routes'][0]['steps']:
+                                        lon_s, lat_s = step['location']
+                                        orden_coords.append([lon_s, lat_s])
+                                        if step['type'] == 'job':
+                                            c_n = ready_coords.iloc[step['job']]['cliente_nombre']
+                                            info_clientes.append({"lat": lat_s, "lon": lon_s, "nombre": c_n})
+    
+                                    body_dir = {"coordinates": orden_coords}
+                                    res_dir = requests.post("https://api.openrouteservice.org/v2/directions/driving-car/geojson", json=body_dir, headers=headers)
+                                    
+                                    if res_dir.status_code == 200:
+                                        st.session_state.datos_ruta_cache = {
+                                            "geojson": res_dir.json(),
+                                            "clientes": info_clientes,
+                                            "origen": [origen[1], origen[0]]
+                                        }
+                                        st.session_state.ids_en_ruta = ready_ids
+    
+                if st.session_state.datos_ruta_cache:
+                    cache = st.session_state.datos_ruta_cache
+                    m = folium.Map(location=cache["origen"], zoom_start=14)
+                    folium.Marker(cache["origen"], popup="LOCAL", icon=folium.Icon(color="green", icon="home")).add_to(m)
+                    
+                    for c in cache["clientes"]:
+                        folium.Marker([c["lat"], c["lon"]], popup=f"Cliente: {c['nombre']}", icon=folium.Icon(color="red")).add_to(m)
+                    
+                    folium.GeoJson(cache["geojson"], style_function=lambda x: {'color': 'blue', 'weight': 5, 'opacity': 0.7}).add_to(m)
+                    
+                    st_folium(m, width=800, height=500, key="mapa_reparto")
+            else:
+                st.info("No hay pedidos con envío a domicilio.")
+    
+    except Exception as e:
+        # Mostramos el error solo en esta sección
+        st.error(f"Error en Envios: {e}")
+        st.info("Podés seguir usando las otras pestañas normalmente.")  
+        
 # --- PESTAÑA 4: CONFIGURACIÓN ---
 with tab4:
     st.header("⚙️ Gestión de Campañas")
-    with st.form("form_campana", clear_on_submit=True):
-        st.subheader("Crear Nueva Campaña")
-        n_nombre = st.text_input("Nombre (Ej: Julio 2026)")
-        n_fecha = st.date_input("Fecha del Evento")
-        n_p_doc = st.number_input("Precio Docena Inicial", value=7000)
-        n_p_med = st.number_input("Precio Media Inicial", value=4000)
-        
-        if st.form_submit_button("Crear Campaña") and n_nombre:
-            supabase.table("campanas").insert({
-                "nombre_campana": n_nombre,
-                "fecha_entrega": str(n_fecha),
-                "precio_docena": n_p_doc,
-                "precio_media": n_p_med,
-                "estado": "Activa"
-            }).execute()
-            st.success("Campaña creada.")
-            st.rerun()
+
+    try:
+        with st.form("form_campana", clear_on_submit=True):
+            st.subheader("Crear Nueva Campaña")
+            n_nombre = st.text_input("Nombre (Ej: Julio 2026)")
+            n_fecha = st.date_input("Fecha del Evento")
+            n_p_doc = st.number_input("Precio Docena Inicial", value=7000)
+            n_p_med = st.number_input("Precio Media Inicial", value=4000)
+            
+            if st.form_submit_button("Crear Campaña") and n_nombre:
+                supabase.table("campanas").insert({
+                    "nombre_campana": n_nombre,
+                    "fecha_entrega": str(n_fecha),
+                    "precio_docena": n_p_doc,
+                    "precio_media": n_p_med,
+                    "estado": "Activa"
+                }).execute()
+                st.success("Campaña creada.")
+                st.rerun()
+
+    except Exception as e:
+        # Mostramos el error solo en esta sección
+        st.error(f"Error en Configuracion: {e}")
+        st.info("Podés seguir usando las otras pestañas normalmente.")
