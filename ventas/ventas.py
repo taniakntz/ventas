@@ -75,30 +75,26 @@ def obtener_coordenadas(direccion):
     if "Oberá" not in texto: texto = f"{texto}, Oberá"
     if "Misiones" not in texto: texto = f"{texto}, Misiones, Argentina"
     
-    headers = {'User-Agent': 'PastelitosLogistica_Diag/1.0 (contacto: admin@obera.com)'}
+    headers = {'User-Agent': 'PastelitosLogistica_v9.0 (contacto: admin@obera.com)'}
     url = "https://nominatim.openstreetmap.org/search"
-    params = {'q': texto, 'format': 'json', 'limit': 1}
     
     try:
-        # Petición principal
-        res = requests.get(url, params=params, headers=headers, timeout=5)
-        
-        # TELEMETRÍA: Muestra el estado exacto de la respuesta
-        st.toast(f"Consulta: '{texto}' | Estado HTTP: {res.status_code}")
-        
-        if res.status_code == 200:
-            data = res.json()
-            if len(data) > 0:
-                return float(data[0]['lat']), float(data[0]['lon'])
-            else:
-                # Si llega acá, el servidor no bloqueó la IP, pero no supo encontrar la calle
-                st.warning(f"La API respondió correctamente pero devolvió resultados vacíos para: '{texto}'")
-        else:
-            # Si llega acá, el servidor bloqueó la IP (Ej: Error 403 Forbidden o 429 Too Many Requests)
-            st.error(f"Bloqueo del servidor OSM (HTTP {res.status_code}): {res.text[:150]}")
+        # Se estructuran los parámetros de consulta para codificar correctamente la URL
+        res = requests.get(url, params={'q': texto, 'format': 'json', 'limit': 1}, headers=headers, timeout=5)
+        if res.status_code == 200 and len(res.json()) > 0:
+            return float(res.json()[0]['lat']), float(res.json()[0]['lon'])
             
-    except Exception as e:
-        st.error(f"Cuelgue de red al intentar conectar con OSM: {str(e)}")
+        # Fallback de limpieza extrema sin números si el primer intento falla
+        texto_sin_numeros = re.sub(r'\d+', '', texto).strip()
+        texto_sin_numeros = re.sub(r'\s+', ' ', texto_sin_numeros)
+        
+        time.sleep(1.2)
+        res_fall = requests.get(url, params={'q': texto_sin_numeros, 'format': 'json', 'limit': 1}, headers=headers, timeout=5)
+        if res_fall.status_code == 200 and len(res_fall.json()) > 0:
+            return float(res_fall.json()[0]['lat']), float(res_fall.json()[0]['lon'])
+            
+    except Exception:
+        pass 
         
     return None, None
     
@@ -127,7 +123,6 @@ with tab1:
     st.header("📝 Nuevo Pedido")
 
     try:
-        # Widgets reactivos para ingreso
         c_nom = st.text_input("Nombre del Cliente", key="in_nom")
         col1, col2 = st.columns(2)
         with col1: c_bat = st.number_input("Docenas Batata", 0.0, step=0.25, key="in_bat")
@@ -152,7 +147,7 @@ with tab1:
                 supabase.table("pedidos").insert({
                     "campana_id": ID_CAMPANA, "cliente_nombre": c_nom, "docenas_batata": c_bat,
                     "docenas_membrillo": c_mem, "total_calculado": total, "estado_pago": c_pag,
-                    "modalidad_entrega": c_mod, "direccion_envio": c_dir, "rango_horario": c_ran,
+                    "metodo_pago": c_met, "modalidad_entrega": c_mod, "direccion_envio": c_dir, "rango_horario": c_ran,
                     "latitud": lat, "longitud": lon
                 }).execute()
                 st.rerun()   
@@ -162,7 +157,6 @@ with tab1:
         if pedidos_req.data:
             df = pd.DataFrame(pedidos_req.data)
             
-            # --- MÓDULO DE PRODUCCIÓN ---
             st.subheader("🧑‍🍳 Resumen Producción")
             df["docenas_batata"] = pd.to_numeric(df["docenas_batata"], errors="coerce").fillna(0)
             df["docenas_membrillo"] = pd.to_numeric(df["docenas_membrillo"], errors="coerce").fillna(0)
@@ -173,9 +167,9 @@ with tab1:
             c3.metric("Total", decimal_a_fraccion(b_t + m_t))    
 
             st.subheader("📋 Gestión de Pedidos")
+            # Vista limpia: Excluye explícitamente direccion_envio y rango_horario para evitar ruido visual
             df_ed = df[["id", "cliente_nombre", "docenas_batata", "docenas_membrillo", "estado_pago", "metodo_pago", "modalidad_entrega", "total_calculado"]].copy()            
 
-            # Limpieza de nulos para evitar casilleros en blanco en los selectores
             df_ed["estado_pago"] = df_ed["estado_pago"].replace([None, "", "nan"], "Pendiente")
             df_ed["metodo_pago"] = df_ed["metodo_pago"].replace([None, "", "nan"], "N/A")
             df_ed["modalidad_entrega"] = df_ed["modalidad_entrega"].replace([None, "", "nan"], "Retiro_Local")
@@ -212,9 +206,7 @@ with tab1:
                         supabase.table("pedidos").delete().eq("id", rid).execute()
                 st.rerun()
                 
-            # --- EXPORTACIÓN AL EXCEL ---
             st.divider()
-            
             df_excel = df.copy()
             df_excel["Batata"] = df_excel["docenas_batata"].apply(decimal_a_fraccion)
             df_excel["Membrillo"] = df_excel["docenas_membrillo"].apply(decimal_a_fraccion)
@@ -222,9 +214,7 @@ with tab1:
 
             st.download_button("📥 Descargar Planilla Excel (Formato A4)", data=excel_data, file_name=f"pedidos_{campana_activa}.xlsx")
 
-            # --- ZONA DE PELIGRO ---
             st.divider()
-
             with st.expander("⚠️ Zona de Peligro: Eliminar todos los pedidos"):
                 st.error("Alerta: Esta acción eliminará permanentemente todos los pedidos de la campaña activa.")
                 confirm = st.checkbox("Confirmar eliminación masiva")
@@ -238,7 +228,6 @@ with tab1:
             st.info("No hay pedidos registrados en esta campaña.")
 
     except Exception as e:
-        # Mostramos el error solo en esta sección
         st.error(f"Error en Pedidos: {e}")
         st.info("Podés seguir usando las otras pestañas normalmente.")
         
@@ -281,7 +270,6 @@ with tab2:
                     st.rerun()
                     
     except Exception as e:
-        # Mostramos el error solo en esta sección
         st.error(f"Error en Balance: {e}")
         st.info("Podés seguir usando las otras pestañas normalmente.")
 
@@ -303,7 +291,7 @@ with tab3:
                 st.subheader("📍 Datos de Envío")
                 res_log = st.data_editor(df_log[["id", "cliente_nombre", "direccion_envio", "rango_horario", "Incluir"]], 
                                          column_config={
-                                             "id":None, "cliente_nombre":st.column_config.TextColumn(disabled=True),
+                                             "id":None, "cliente_nombre":st.column_config.TextColumn("Cliente", disabled=True),
                                              "Incluir": st.column_config.CheckboxColumn("Incluir", default=True),
                                              "rango_horario":st.column_config.SelectboxColumn("Horario", options=["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"])
                                          }, hide_index=True, key="log_vfinal")
@@ -314,7 +302,7 @@ with tab3:
                     st_l = st.session_state["log_vfinal"]
                     hubo_cambios = False
                     
-                    # FASE 1: Guardar modificaciones directas en la tabla
+                    # FASE 1: Guardar modificaciones directas hechas en la tabla
                     if st_l["edited_rows"]:
                         for i_s, m in st_l["edited_rows"].items():
                             rid = df_log.iloc[int(i_s)]["id"]
@@ -332,11 +320,11 @@ with tab3:
                                 supabase.table("pedidos").update(datos_a_guardar).eq("id", rid).execute()
                                 hubo_cambios = True
 
-                    # FASE 2: Barrido automático de pendientes
+                    # FASE 2: Escaneo y conversión automática de registros vacíos/EMPTY
                     pendientes = df_log[df_log['latitud'].isnull() | df_log['longitud'].isnull()]
                     
                     if not pendientes.empty:
-                        with st.spinner(f"Mapeando {len(pendientes)} direcciones pendientes..."):
+                        with st.spinner(f"Mapeando {len(pendientes)} direcciones en segundo plano..."):
                             for idx, row in pendientes.iterrows():
                                 if str(idx) not in st_l["edited_rows"]:
                                     lat, lon = obtener_coordenadas(row["direccion_envio"])
@@ -349,7 +337,7 @@ with tab3:
                         st.session_state.datos_ruta_cache = None 
                         st.rerun()
                     elif not pendientes.empty:
-                        st.warning("⚠️ La API no encontró coordenadas nuevas. Verificá el formato (ej: usar 'y' para intersecciones, quitar rangos) en las direcciones pendientes.")
+                        st.warning("⚠️ El motor cartográfico no logró decodificar las nuevas direcciones. Comprobá que no contengan abreviaturas o formatos inválidos.")
     
                 if col_l2.button("🗺️ Generar/Ver Ruta Óptima"):
                     ready_ids = res_log[res_log['Incluir'] == True]['id'].tolist()
@@ -359,7 +347,7 @@ with tab3:
                             ready_coords = df_log[(df_log['id'].isin(ready_ids)) & (df_log['latitud'].notnull())]
                             
                             if len(ready_coords) < 1:
-                                st.error("❌ Ninguno de los pedidos seleccionados tiene Latitud/Longitud cargada en la tabla.")
+                                st.error("❌ No hay coordenadas asignadas en la base de datos para generar la ruta.")
                             else:
                                 origen = [-55.1089, -27.4766] 
                                 
@@ -380,7 +368,7 @@ with tab3:
                                 
                                 api_key = st.secrets.get("ORS_API_KEY", "")
                                 if not api_key:
-                                    st.error("🚨 Error Crítico: No se encontró 'ORS_API_KEY' en tus secretos (.streamlit/secrets.toml).")
+                                    st.error("🚨 Error Crítico: No se encontró 'ORS_API_KEY' en los secretos.")
                                 else:
                                     headers = {"Authorization": api_key, "Content-Type": "application/json"}
                                     res_vrp = requests.post("https://api.openrouteservice.org/optimization", json=body_vrp, headers=headers)
@@ -411,9 +399,9 @@ with tab3:
                                                 st.session_state.ids_en_ruta = ready_ids
                                                 st.rerun() 
                                             else:
-                                                st.error(f"❌ Error al trazar las calles (HTTP {res_dir.status_code}): {res_dir.text}")
+                                                st.error(f"❌ Error al trazar calles (HTTP {res_dir.status_code}): {res_dir.text}")
                                         else:
-                                            st.error("⚠️ La API funcionó, pero no devolvió ninguna ruta válida.")
+                                            st.error("⚠️ La API de optimización no pudo trazar un trayecto coherente con esos puntos.")
                                     else:
                                         st.error(f"❌ Error de OpenRouteService (HTTP {res_vrp.status_code}): {res_vrp.text}")
     
@@ -426,7 +414,6 @@ with tab3:
                         folium.Marker([c["lat"], c["lon"]], popup=f"Cliente: {c['nombre']}", icon=folium.Icon(color="red")).add_to(m)
                     
                     folium.GeoJson(cache["geojson"], style_function=lambda x: {'color': 'blue', 'weight': 5, 'opacity': 0.7}).add_to(m)
-                    
                     st_folium(m, width=800, height=500, key="mapa_reparto")
             else:
                 st.info("No hay pedidos con envío a domicilio.")
@@ -458,6 +445,5 @@ with tab4:
                 st.rerun()
 
     except Exception as e:
-        # Mostramos el error solo en esta sección
         st.error(f"Error en Configuracion: {e}")
         st.info("Podés seguir usando las otras pestañas normalmente.")
