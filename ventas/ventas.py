@@ -371,13 +371,31 @@ with tab3:
                             
                             if datos_a_guardar:
                                 if "direccion_envio" in datos_a_guardar:
-                                    lat, lon = obtener_coordenadas(datos_a_guardar["direccion_envio"])
-
-                                    if lat is not None and lon is not None:
-                                        datos_a_guardar.update({"latitud": lat,"longitud": lon})
-                                    else:
-                                        st.warning(f"""⚠️ No se pudo encontrar una coordenada válida para:{datos_a_guardar['direccion_envio']}""")
-                                        continue
+                                
+                                    direccion_actual = datos_a_guardar["direccion_envio"]
+                                
+                                    if direccion_actual:
+                                
+                                        lat, lon = obtener_coordenadas(
+                                            direccion_actual
+                                        )
+                                
+                                        if lat is not None and lon is not None:
+                                
+                                            datos_a_guardar.update({
+                                                "latitud": lat,
+                                                "longitud": lon
+                                            })
+                                
+                                        else:
+                                
+                                            st.warning(
+                                                f"""
+                                                ⚠️ No se pudo localizar:
+                                
+                                                {direccion_actual}
+                                                """
+                                            )
                                     
                                 supabase.table("pedidos").update(datos_a_guardar).eq("id", rid).execute()
                                 hubo_cambios = True
