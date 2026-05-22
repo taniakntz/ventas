@@ -439,8 +439,8 @@ with tab3:
                         if not pedidos_ruta:
                             st.warning("No hay pedidos con coordenadas válidas.")
                         else:
-                            ORIGEN_LAT = -27.4872
-                            ORIGEN_LON = -55.1194
+                            ORIGEN_LAT = -27.476740
+                            ORIGEN_LON = -55.108945
 
                             coords_ors = [[ORIGEN_LON, ORIGEN_LAT]]
                             for p in pedidos_ruta:
