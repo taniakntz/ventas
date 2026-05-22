@@ -417,11 +417,11 @@ with tab3:
                 
                         st.rerun() 
                     else:
-                                                st.error(f"❌ Error al trazar calles (HTTP {res_dir.status_code}): {res_dir.text}")
+                        st.error(f"❌ Error al trazar calles (HTTP {res_dir.status_code}): {res_dir.text}")
                 else:
-                st.error("⚠️ La API de optimización no pudo trazar un trayecto coherente con esos puntos.")
+                    st.error("⚠️ La API de optimización no pudo trazar un trayecto coherente con esos puntos.")
             else:
-            st.error(f"❌ Error de OpenRouteService (HTTP {res_vrp.status_code}): {res_vrp.text}")
+                st.error(f"❌ Error de OpenRouteService (HTTP {res_vrp.status_code}): {res_vrp.text}")
     
                 if st.session_state.datos_ruta_cache:
                     cache = st.session_state.datos_ruta_cache
