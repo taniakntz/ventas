@@ -117,16 +117,27 @@ with tab1:
             c_ran = st.selectbox("Rango Horario", ["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"], key="in_ran")
     
         if st.button("Guardar Pedido", type="primary"):
-            if not c_nom: st.error("⚠️ El nombre es obligatorio.")
+            if not c_nom: 
+                st.error("⚠️ El nombre es obligatorio.")
             else:
                 total = calcular_total(c_bat, c_mem, PRECIO_DOCENA, PRECIO_MEDIA)
                 lat, lon = obtener_coordenadas(c_dir) if c_dir else (None, None)
+                
+                # 1. Ejecución de guardado
                 supabase.table("pedidos").insert({
                     "campana_id": ID_CAMPANA, "cliente_nombre": c_nom, "docenas_batata": c_bat,
                     "docenas_membrillo": c_mem, "total_calculado": total, "estado_pago": c_pag,
-                    "modalidad_entrega": c_mod, "direccion_envio": c_dir, "rango_horario": c_ran,
+                    "metodo_pago": c_met, "modalidad_entrega": c_mod, "direccion_envio": c_dir, "rango_horario": c_ran,
                     "latitud": lat, "longitud": lon
                 }).execute()
+                
+                # 2. LIMPIEZA DE CAMPOS (Insertado acá)
+                campos_a_limpiar = ["in_nom", "in_bat", "in_mem", "in_mod", "in_pag", "in_met", "in_dir", "in_ran"]
+                for clave in campos_a_limpiar:
+                    if clave in st.session_state:
+                        del st.session_state[clave]
+                
+                # 3. Recarga de la app
                 st.rerun()
     
         st.divider()
@@ -160,7 +171,8 @@ with tab1:
                     "total_calculado": st.column_config.NumberColumn("Total ($)", disabled=True),
                     "modalidad_entrega": st.column_config.SelectboxColumn("Entrega", options=["Retiro_Local", "Envio_Domicilio"], required=True),
                     "estado_pago": st.column_config.SelectboxColumn("Pago", options=["Pendiente", "Pagado"], required=True),
-                    "estado_pago": st.column_config.SelectboxColumn("Pago", options=["Pendiente", "Pagado"], required=True)
+                    # Corrección del error de duplicación:
+                    "metodo_pago": st.column_config.SelectboxColumn("Método", options=["N/A", "Efectivo", "MP"], required=True)
                 }, 
                 num_rows="dynamic", hide_index=True, key="p_v_final_strict"
             )
