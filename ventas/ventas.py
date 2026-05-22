@@ -578,181 +578,163 @@ with tab3:
             # =====================================
             
             if col_l2.button("🗺️ Generar/Ver Ruta Óptima"):
+
+                try:
             
-                ready = df_log[
-                    (df_log["Incluir"] == True)
-                ]
+                    pedidos_ruta = []
             
-                if ready.empty:
+                    for _, row in res_log.iterrows():
             
-                    st.warning(
-                        "⚠️ No hay pedidos seleccionados."
-                    )
+                        if row["Incluir"]:
             
-                else:
+                            pedido_db = next(
+                                (
+                                    p for p in pedidos_req.data
+                                    if p["id"] == row["id"]
+                                ),
+                                None
+                            )
             
-                    ready_ids = ready["id"].tolist()
+                            if (
+                                pedido_db
+                                and pedido_db.get("latitud") is not None
+                                and pedido_db.get("longitud") is not None
+                            ):
             
-                    origen = [-55.1194, -27.4872]
+                                pedidos_ruta.append({
+                                    "id": pedido_db["id"],
+                                    "nombre": pedido_db["cliente_nombre"],
+                                    "lat": float(pedido_db["latitud"]),
+                                    "lon": float(pedido_db["longitud"])
+                                })
             
-                    jobs = []
+                    if not pedidos_ruta:
             
-                    map_nombres = {}
-            
-                    for i, (_, row) in enumerate(
-                        ready.iterrows(),
-                        start=1
-                    ):
-            
-                        pedido_db = df[
-                            df["id"] == row["id"]
-                        ].iloc[0]
-            
-                        lat = pedido_db["latitud"]
-                        lon = pedido_db["longitud"]
-            
-                        if pd.notna(lat) and pd.notna(lon):
-            
-                            jobs.append({
-                                "id": i,
-                                "location": [lon, lat]
-                            })
-            
-                            map_nombres[i] = row[
-                                "cliente_nombre"
-                            ]
-            
-                    if not jobs:
-            
-                        st.error(
-                            "⚠️ Ningún pedido tiene coordenadas válidas."
+                        st.warning(
+                            "No hay pedidos con coordenadas válidas."
                         )
             
                     else:
             
-                        body_vrp = {
-                            "jobs": jobs,
-                            "vehicles": [{
-                                "id": 1,
-                                "profile": "driving-car",
-                                "start": origen,
-                                "end": origen
-                            }]
-                        }
+                        # =====================================
+                        # ORIGEN FIJO DEL LOCAL
+                        # =====================================
             
-                        headers = {
-                            "Authorization":
-                                st.secrets["ORS_API_KEY"],
-                            "Content-Type":
-                                "application/json"
-                        }
+                        ORIGEN_LAT = -27.4872
+                        ORIGEN_LON = -55.1194
             
-                        res_vrp = requests.post(
-                            "https://api.openrouteservice.org/optimization",
-                            json=body_vrp,
-                            headers=headers
+                        # ORS USA [LON, LAT]
+                        coords_ors = [
+                            [ORIGEN_LON, ORIGEN_LAT]
+                        ]
+            
+                        for p in pedidos_ruta:
+            
+                            coords_ors.append([
+                                p["lon"],
+                                p["lat"]
+                            ])
+            
+                        # =====================================
+                        # DIRECTIONS API
+                        # =====================================
+            
+                        url_dir = (
+                            "https://api.openrouteservice.org/v2/directions/driving-car/geojson"
                         )
             
-                        if res_vrp.status_code == 200:
+                        headers = {
+                            "Authorization": st.secrets["ORS_API_KEY"],
+                            "Content-Type": "application/json"
+                        }
             
-                            data_vrp = res_vrp.json()
+                        body_dir = {
+                            "coordinates": coords_ors,
+                            "radiuses": [1500] * len(coords_ors)
+                        }
             
-                            orden_coords = [origen]
+                        res_dir = requests.post(
+                            url_dir,
+                            json=body_dir,
+                            headers=headers,
+                            timeout=30
+                        )
             
-                            info_clientes = []
+                        if res_dir.status_code == 200:
             
-                            rutas = data_vrp.get(
-                                'routes',
-                                []
+                            geojson = res_dir.json()
+            
+                            # =====================================
+                            # MAPA
+                            # =====================================
+            
+                            m = folium.Map(
+                                location=[
+                                    ORIGEN_LAT,
+                                    ORIGEN_LON
+                                ],
+                                zoom_start=14
                             )
             
-                            if rutas:
+                            # LOCAL
+                            folium.Marker(
+                                [ORIGEN_LAT, ORIGEN_LON],
+                                popup="LOCAL",
+                                icon=folium.Icon(
+                                    color="green",
+                                    icon="home"
+                                )
+                            ).add_to(m)
             
-                                for step in rutas[0]['steps']:
+                            # CLIENTES
+                            for p in pedidos_ruta:
             
-                                    lon_s, lat_s = step[
-                                        'location'
-                                    ]
-            
-                                    orden_coords.append(
-                                        [lon_s, lat_s]
+                                folium.Marker(
+                                    [p["lat"], p["lon"]],
+                                    popup=f"Cliente: {p['nombre']}",
+                                    icon=folium.Icon(
+                                        color="red"
                                     )
+                                ).add_to(m)
             
-                                    if step['type'] == 'job':
-            
-                                        c_n = map_nombres.get(
-                                            step['job'],
-                                            "Desconocido"
-                                        )
-            
-                                        info_clientes.append({
-                                            "lat": lat_s,
-                                            "lon": lon_s,
-                                            "nombre": c_n
-                                        })
-            
-                                body_dir = {
-                                    "coordinates": orden_coords
+                            # RUTA
+                            folium.GeoJson(
+                                geojson,
+                                style_function=lambda x: {
+                                    "color": "blue",
+                                    "weight": 5,
+                                    "opacity": 0.8
                                 }
+                            ).add_to(m)
             
-                                res_dir = requests.post(
-                                    "https://api.openrouteservice.org/v2/directions/driving-car/geojson",
-                                    json=body_dir,
-                                    headers=headers
-                                )
+                            st.session_state.datos_ruta_cache = {
+                                "mapa": m
+                            }
             
-                                if res_dir.status_code == 200:
+                            st.success(
+                                "✅ Ruta generada correctamente"
+                            )
             
-                                    st.session_state.datos_ruta_cache = {
-                                        "geojson": res_dir.json(),
-                                        "clientes": info_clientes,
-                                        "origen": [
-                                            origen[1],
-                                            origen[0]
-                                        ]
-                                    }
-            
-                                    st.session_state.ids_en_ruta = ready_ids
-            
-                                    st.rerun()
-            
-                                else:
-            
-                                    st.error(
-                                        f"""
-                                        ❌ Error al trazar calles
-                                        (HTTP {res_dir.status_code}):
-            
-                                        {res_dir.text}
-                                        """
-                                    )
-            
-                            else:
-            
-                                st.error(
-                                    """
-                                    ⚠️ La API de optimización no pudo
-                                    generar una ruta coherente.
-                                    """
-                                )
+                            st.rerun()
             
                         else:
             
                             st.error(
                                 f"""
-                                ❌ Error de OpenRouteService
-                                (HTTP {res_vrp.status_code}):
+                                ❌ Error al generar ruta
             
-                                {res_vrp.text}
+                                HTTP: {res_dir.status_code}
+            
+                                {res_dir.text}
                                 """
                             )
-    except Exception as e:
-
-        st.error(f"Error en Reparto: {e}")
-
-        st.info(
-            "Podés seguir usando las otras pestañas normalmente."
-        )
+            
+                except Exception as e:
+                    st.error(f"Error generando ruta: {e}")
+                    st.info(
+                        "Podés seguir usando las otras pestañas normalmente."
+                    )
+                    
 # --- PESTAÑA 4: CONFIGURACIÓN ---
 with tab4:
     st.header("⚙️ Gestión de Campañas")
