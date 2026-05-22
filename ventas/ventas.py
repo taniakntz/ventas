@@ -161,7 +161,7 @@ def obtener_coordenadas(direccion):
             else:
                 break
 
-        except Exception:
+        except Exception as e:
             st.error(f"ERROR REAL: {e}")
             time.sleep(espera)
 
