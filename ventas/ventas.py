@@ -161,7 +161,7 @@ with tab1:
                     "total_calculado": st.column_config.NumberColumn("Total ($)", disabled=True),
                     "modalidad_entrega": st.column_config.SelectboxColumn("Entrega", options=["Retiro_Local", "Envio_Domicilio"], required=True),
                     "estado_pago": st.column_config.SelectboxColumn("Pago", options=["Pendiente", "Pagado"], required=True),
-                    "estado_pago": st.column_config.SelectboxColumn("Pago", options=["Pendiente", "Pagado"], required=True)
+                    "metodo_pago": st.column_config.SelectboxColumn("Método", options=["N/A", "Efectivo", "MP"], required=True)
                 }, 
                 num_rows="dynamic", hide_index=True, key="p_v_final_strict"
             )   
