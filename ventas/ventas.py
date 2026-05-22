@@ -70,34 +70,49 @@ def calcular_total(batata, membrillo, precio_doc, precio_med):
 def obtener_coordenadas(direccion):
     if not direccion or str(direccion).strip().upper() == "EMPTY": 
         return None, None
+        
+    texto = str(direccion).strip()
+
+    # Interceptor manual por si pegás las coordenadas de Google
+    match_coords = re.search(r'(-?\d{1,2}\.\d+)[,\s]+(-?\d{1,3}\.\d+)', texto)
+    if match_coords:
+        return float(match_coords.group(1)), float(match_coords.group(2))
     
-    texto = str(direccion).replace("&", "y").strip()
-    if "Oberá" not in texto: texto = f"{texto}, Oberá"
-    if "Misiones" not in texto: texto = f"{texto}, Misiones, Argentina"
+    # Limpieza de texto
+    texto = texto.replace("&", "y")
+    if "Oberá" not in texto: texto = f"{texto}, Oberá, Misiones"
     
-    headers = {'User-Agent': 'PastelitosLogistica_v9.0 (contacto: admin@obera.com)'}
-    url = "https://nominatim.openstreetmap.org/search"
+    # NUEVO MOTOR: Geocodificador de OpenRouteService
+    api_key = st.secrets.get("ORS_API_KEY", "")
+    if not api_key:
+        st.error("🚨 Falta ORS_API_KEY en secretos.")
+        return None, None
+        
+    url = "https://api.openrouteservice.org/geocode/search"
+    params = {
+        'api_key': api_key,
+        'text': texto,
+        'size': 1 # Solo queremos el mejor resultado
+    }
     
     try:
-        # Se estructuran los parámetros de consulta para codificar correctamente la URL
-        res = requests.get(url, params={'q': texto, 'format': 'json', 'limit': 1}, headers=headers, timeout=5)
-        if res.status_code == 200 and len(res.json()) > 0:
-            return float(res.json()[0]['lat']), float(res.json()[0]['lon'])
-            
-        # Fallback de limpieza extrema sin números si el primer intento falla
-        texto_sin_numeros = re.sub(r'\d+', '', texto).strip()
-        texto_sin_numeros = re.sub(r'\s+', ' ', texto_sin_numeros)
+        res = requests.get(url, params=params, timeout=5)
         
-        time.sleep(1.2)
-        res_fall = requests.get(url, params={'q': texto_sin_numeros, 'format': 'json', 'limit': 1}, headers=headers, timeout=5)
-        if res_fall.status_code == 200 and len(res_fall.json()) > 0:
-            return float(res_fall.json()[0]['lat']), float(res_fall.json()[0]['lon'])
+        if res.status_code == 200:
+            data = res.json()
+            if data.get('features') and len(data['features']) > 0:
+                # ORS devuelve la geometría en formato [Longitud, Latitud]
+                lon, lat = data['features'][0]['geometry']['coordinates']
+                return float(lat), float(lon)
+            else:
+                st.toast(f"❌ El mapa no encontró: '{texto}'")
+        else:
+            st.toast(f"❌ Error de servidor ORS: HTTP {res.status_code}")
             
-    except Exception:
-        pass 
+    except Exception as e:
+        st.toast(f"❌ Cuelgue de red: {e}")
         
-    return None, None
-    
+    return None, None    
 def exportar_excel(dataframe):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
