@@ -87,89 +87,78 @@ def obtener_coordenadas(direccion):
 
     texto_normalizado = normalizar_texto(texto)
 
-    # =========================
-    # NORMALIZACIÓN INTELIGENTE
-    # =========================
+    # =====================================
+    # NORMALIZACIÓN
+    # =====================================
 
     if "obera" not in texto_normalizado:
+
         texto = f"{texto}, Oberá, Misiones, Argentina"
 
     elif "argentina" not in texto_normalizado:
+
         texto = f"{texto}, Misiones, Argentina"
 
-    url = "https://nominatim.openstreetmap.org/search"
+    # =====================================
+    # OPENROUTESERVICE GEOCODER
+    # =====================================
+
+    url = (
+        "https://api.openrouteservice.org/geocode/search"
+    )
 
     headers = {
-        "User-Agent": (
-            "Mozilla/5.0 "
-            "(Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 "
-            "(KHTML, like Gecko) "
-            "Chrome/120.0 Safari/537.36"
-        ),
-        "Accept-Language": "es"
+        "Authorization": st.secrets["ORS_API_KEY"]
     }
 
-    tiempos_espera = [2, 5, 10]
+    params = {
+        "text": texto,
+        "size": 1,
+        "boundary.country": "AR"
+    }
 
-    for espera in tiempos_espera:
-    
-        try:
+    try:
 
-            time.sleep(1)
-        
-            st.write("QUERY FINAL:", texto)
-        
-            res = requests.get(
-                url,
-                params={
-                    'q': texto,
-                    'format': 'json',
-                    'limit': 1,
-                    'countrycodes': 'ar'
-                },
-                headers=headers,
-                timeout=15
+        res = requests.get(
+            url,
+            headers=headers,
+            params=params,
+            timeout=15
+        )
+
+        st.write("QUERY FINAL:", texto)
+        st.write("STATUS:", res.status_code)
+
+        if res.status_code != 200:
+
+            st.error(
+                f"Error ORS Geocoder: {res.status_code}"
             )
-        
-            st.write("STATUS:", res.status_code)
-        
-            if res.status_code == 429:
-        
-                st.error(
-                    """
-                    ⚠️ Nominatim bloqueó temporalmente las requests.
-                    Esperá unos minutos antes de volver a intentar.
-                    """
-                )
-        
-                return None, None
-        
-            if res.status_code != 200:
-        
-                st.error(f"HTTP {res.status_code}")
-        
-                return None, None
-        
-            data = res.json()
-        
-            st.write("DATA:", data)
-        
-            if not data:
-        
-                return None, None
-        
-            return (
-                float(data[0]['lat']),
-                float(data[0]['lon'])
-            )
-        
-        except Exception as e:
-        
-            st.error(f"ERROR REAL: {e}")
-        
+
             return None, None
-    
+
+        data = res.json()
+
+        features = data.get("features", [])
+
+        if not features:
+
+            return None, None
+
+        coords = features[0]["geometry"]["coordinates"]
+
+        lon = coords[0]
+        lat = coords[1]
+
+        return lat, lon
+
+    except Exception as e:
+
+        st.error(f"ERROR GEOCODING: {e}")
+
+        return None, None
+
+
 def exportar_excel(dataframe):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
