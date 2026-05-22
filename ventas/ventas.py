@@ -272,7 +272,7 @@ with tab2:
                     st_g = st.session_state["g_ed"]
                     for i_s, m in st_g["edited_rows"].items():
                         rid = df_gastos.iloc[int(i_s)]["id"]
-                        if "fecha_registro" in m: m m["fecha_registro"] = str(m["fecha_registro"])
+                        if "fecha_registro" in m: m["fecha_registro"] = str(m["fecha_registro"])
                         supabase.table("gastos").update(m).eq("id", rid).execute()
                     for i in st_g["deleted_rows"]:
                         supabase.table("gastos").delete().eq("id", df_gastos.iloc[i]["id"]).execute()
