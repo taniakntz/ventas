@@ -118,9 +118,6 @@ def obtener_coordenadas(direccion):
     
             time.sleep(1)
             
-            st.write("STATUS:", res.status_code)
-            st.write("QUERY FINAL:", texto)
-            
             res = requests.get(
                 url,
                 params={
@@ -132,7 +129,10 @@ def obtener_coordenadas(direccion):
                 headers=headers,
                 timeout=15
             )
-
+            
+            st.write("STATUS:", res.status_code)
+            st.write("QUERY FINAL:", texto)
+            
             if res.status_code == 200:
 
                 data = res.json()
