@@ -307,31 +307,47 @@ with tab3:
                                          }, hide_index=True, key="log_vfinal")
                 
                 col_l1, col_l2 = st.columns(2)
+                
                 if col_l1.button("📍 Actualizar Logística"):
                     st_l = st.session_state["log_vfinal"]
-                    for i_s, m in st_l["edited_rows"].items():
-                        rid = df_log.iloc[int(i_s)]["id"]
-                        
-                        # 1. Creamos una copia de las modificaciones
-                        datos_a_guardar = m.copy()
-                        
-                        # 2. Eliminamos la columna virtual de la interfaz
-                        if "Incluir" in datos_a_guardar:
-                            del datos_a_guardar["Incluir"]
-                        
-                        # 3. Solo operamos si quedaron datos reales
-                        if datos_a_guardar:
-                            if "direccion_envio" in datos_a_guardar:
-                                lat, lon = obtener_coordenadas(datos_a_guardar["direccion_envio"])
-                                # CONDICIONAL DE SEGURIDAD: Solo se adjunta si la API trajo datos
-                                if lat is not None and lon is not None:
-                                    datos_a_guardar.update({"latitud": lat, "longitud": lon})
-                                
-                            # Actualización limpia hacia Supabase
-                            supabase.table("pedidos").update(datos_a_guardar).eq("id", rid).execute()
+                    hubo_cambios = False
+                    
+                    # FASE 1: Guardar modificaciones directas en la tabla
+                    if st_l["edited_rows"]:
+                        for i_s, m in st_l["edited_rows"].items():
+                            rid = df_log.iloc[int(i_s)]["id"]
+                            datos_a_guardar = m.copy()
                             
-                    st.session_state.datos_ruta_cache = None 
-                    st.rerun()
+                            if "Incluir" in datos_a_guardar:
+                                del datos_a_guardar["Incluir"]
+                            
+                            if datos_a_guardar:
+                                if "direccion_envio" in datos_a_guardar:
+                                    lat, lon = obtener_coordenadas(datos_a_guardar["direccion_envio"])
+                                    if lat is not None and lon is not None:
+                                        datos_a_guardar.update({"latitud": lat, "longitud": lon})
+                                
+                                supabase.table("pedidos").update(datos_a_guardar).eq("id", rid).execute()
+                                hubo_cambios = True
+
+                    # FASE 2: Barrido automático de pendientes
+                    pendientes = df_log[df_log['latitud'].isnull() | df_log['longitud'].isnull()]
+                    
+                    if not pendientes.empty:
+                        with st.spinner(f"Mapeando {len(pendientes)} direcciones pendientes..."):
+                            for idx, row in pendientes.iterrows():
+                                if str(idx) not in st_l["edited_rows"]:
+                                    lat, lon = obtener_coordenadas(row["direccion_envio"])
+                                    if lat is not None and lon is not None:
+                                        supabase.table("pedidos").update({"latitud": lat, "longitud": lon}).eq("id", row["id"]).execute()
+                                        hubo_cambios = True
+                                    time.sleep(1.2) 
+
+                    if hubo_cambios:
+                        st.session_state.datos_ruta_cache = None 
+                        st.rerun()
+                    elif not pendientes.empty:
+                        st.warning("⚠️ La API no encontró coordenadas nuevas. Verificá el formato (ej: usar 'y' para intersecciones, quitar rangos) en las direcciones pendientes.")
     
                 if col_l2.button("🗺️ Generar/Ver Ruta Óptima"):
                     ready_ids = res_log[res_log['Incluir'] == True]['id'].tolist()
@@ -343,9 +359,8 @@ with tab3:
                             if len(ready_coords) < 1:
                                 st.error("❌ Ninguno de los pedidos seleccionados tiene Latitud/Longitud cargada en la tabla.")
                             else:
-                                origen = [-55.1089, -27.4766] # [Longitud, Latitud] para VRP
+                                origen = [-55.1089, -27.4766] 
                                 
-                                # 1. Forzamos los datos a tipos nativos y aseguramos los nombres
                                 jobs_list = []
                                 map_nombres = {}
                                 for i, (_, row) in enumerate(ready_coords.iterrows()):
@@ -361,7 +376,6 @@ with tab3:
                                     "jobs": jobs_list
                                 }
                                 
-                                # 2. Verificamos explícitamente la llave de la API
                                 api_key = st.secrets.get("ORS_API_KEY", "")
                                 if not api_key:
                                     st.error("🚨 Error Crítico: No se encontró 'ORS_API_KEY' en tus secretos (.streamlit/secrets.toml).")
@@ -369,7 +383,6 @@ with tab3:
                                     headers = {"Authorization": api_key, "Content-Type": "application/json"}
                                     res_vrp = requests.post("https://api.openrouteservice.org/optimization", json=body_vrp, headers=headers)
                                     
-                                    # 3. Control de Errores Restablecido
                                     if res_vrp.status_code == 200:
                                         data_vrp = res_vrp.json()
                                         orden_coords = [origen]
@@ -381,7 +394,6 @@ with tab3:
                                                 lon_s, lat_s = step['location']
                                                 orden_coords.append([lon_s, lat_s])
                                                 if step['type'] == 'job':
-                                                    # Recuperamos el nombre usando nuestro mapeo seguro
                                                     c_n = map_nombres.get(step['job'], "Desconocido")
                                                     info_clientes.append({"lat": lat_s, "lon": lon_s, "nombre": c_n})
 
@@ -392,10 +404,10 @@ with tab3:
                                                 st.session_state.datos_ruta_cache = {
                                                     "geojson": res_dir.json(),
                                                     "clientes": info_clientes,
-                                                    "origen": [origen[1], origen[0]] # [Lat, Lon] para que Folium lo dibuje bien
+                                                    "origen": [origen[1], origen[0]] 
                                                 }
                                                 st.session_state.ids_en_ruta = ready_ids
-                                                st.rerun() # Forzamos recarga para que el mapa aparezca de inmediato
+                                                st.rerun() 
                                             else:
                                                 st.error(f"❌ Error al trazar las calles (HTTP {res_dir.status_code}): {res_dir.text}")
                                         else:
@@ -417,10 +429,9 @@ with tab3:
             else:
                 st.info("No hay pedidos con envío a domicilio.")
     except Exception as e:
-        # Mostramos el error solo en esta sección
         st.error(f"Error en Reparto: {e}")
         st.info("Podés seguir usando las otras pestañas normalmente.")
-
+        
 # --- PESTAÑA 4: CONFIGURACIÓN ---
 with tab4:
     st.header("⚙️ Gestión de Campañas")
