@@ -70,97 +70,50 @@ def calcular_total(batata, membrillo, precio_doc, precio_med):
 
 def normalizar_texto(txt):
     txt = unicodedata.normalize('NFKD', txt)
-    return ''.join(
-        c for c in txt
-        if not unicodedata.combining(c)
-    ).lower()
+    return ''.join(c for c in txt if not unicodedata.combining(c)).lower()
     
 def obtener_coordenadas(direccion):
+    if not direccion: return None, None
+    texto_original = str(direccion).strip()
+    if texto_original.upper() == "EMPTY": return None, None
 
-    if not direccion:
-        return None, None
+    # 1. INTERCEPTOR MANUAL (Bypass total para evitar la API si pasás coordenadas limpias)
+    match_coords = re.search(r'(-?\d{1,2}\.\d+)[,\s]+(-?\d{1,3}\.\d+)', texto_original)
+    if match_coords:
+        return float(match_coords.group(1)), float(match_coords.group(2))
 
-    texto = str(direccion).strip()
+    # 2. PARCHE LÉXICO (Intersecciones)
+    if " y " in texto_original.lower():
+        texto = re.split(r'\s+y\s+', texto_original, flags=re.IGNORECASE)[0].strip()
+    else:
+        texto = texto_original
 
-    if texto.upper() == "EMPTY":
-        return None, None
-
+    # 3. PHOTON API
     texto_normalizado = normalizar_texto(texto)
-
-    # =====================================
-    # NORMALIZAR DIRECCION
-    # =====================================
-
-    if "obera" not in texto_normalizado:
-        texto = f"{texto}, Oberá, Misiones, Argentina"
-
-    elif "argentina" not in texto_normalizado:
-        texto = f"{texto}, Misiones, Argentina"
-
-    # =====================================
-    # PHOTON API
-    # =====================================
+    if "obera" not in texto_normalizado: texto = f"{texto}, Oberá, Misiones, Argentina"
+    elif "argentina" not in texto_normalizado: texto = f"{texto}, Misiones, Argentina"
 
     url = "https://photon.komoot.io/api/"
-
-    params = {
-        "q": texto,
-        "limit": 5
-    }
-    
-    # CABECERA OBLIGATORIA ANTIBLOQUEO
-    headers = {
-        'User-Agent': 'PastelitosApp_Obera/1.0 (contacto: admin@obera.com)'
-    }
+    params = {"q": texto, "limit": 5}
+    headers = {'User-Agent': 'PastelitosApp_Obera/1.0 (contacto: admin@obera.com)'}
 
     try:
-
-        res = requests.get(
-            url,
-            params=params,
-            headers=headers,
-            timeout=15
-        )
-
-        if res.status_code != 200:
-            st.error(f"Photon HTTP {res.status_code}")
-            return None, None
-
-        data = res.json()
-        features = data.get("features", [])
-
-        if not features:
-            st.warning(f"No se encontró: {texto}")
-            return None, None
-
-        # =====================================
-        # BUSCAR RESULTADO EN OBERÁ
-        # =====================================
+        res = requests.get(url, params=params, headers=headers, timeout=15)
+        if res.status_code != 200: return None, None
+        
+        features = res.json().get("features", [])
+        if not features: return None, None
 
         for f in features:
-
             coords = f["geometry"]["coordinates"]
-            lon = coords[0]
-            lat = coords[1]
             props = f.get("properties", {})
+            ciudad = props.get("city", "") or props.get("county", "") or props.get("state", "")
+            if "obera" in normalizar_texto(ciudad):
+                return coords[1], coords[0] # lat, lon
 
-            ciudad = (
-                props.get("city", "")
-                or props.get("county", "")
-                or props.get("state", "")
-            )
-
-            ciudad_norm = normalizar_texto(ciudad)
-
-            # VALIDAR OBERÁ
-            if "obera" in ciudad_norm:
-                return lat, lon
-
-        st.warning(f"No hubo resultados válidos en Oberá para: {texto}")
         return None, None
 
-    except Exception as e:
-        st.error(f"ERROR GEOCODING: {e}")
+    except Exception:
         return None, None
         
 def exportar_excel(dataframe):
@@ -188,7 +141,10 @@ with tab1:
     st.header("📝 Nuevo Pedido")
 
     try:
-        c_nom = st.text_input("Nombre del Cliente", key="in_nom")
+        col_n1, col_n2 = st.columns(2)
+        with col_n1: c_nom = st.text_input("Nombre del Cliente", key="in_nom")
+        with col_n2: c_tel = st.text_input("WhatsApp (Solo números. Ej: 3755123456)", key="in_tel")
+        
         col1, col2 = st.columns(2)
         with col1: c_bat = st.number_input("Docenas Batata", 0.0, step=0.25, key="in_bat")
         with col2: c_mem = st.number_input("Docenas Membrillo", 0.0, step=0.25, key="in_mem")      
@@ -200,8 +156,9 @@ with tab1:
 
         c_dir, c_ran = None, None
         if c_mod == "Envio_Domicilio":
-            c_dir = st.text_input("Dirección de Envío", placeholder="Calle, Ciudad", key="in_dir")
-            c_ran = st.selectbox("Rango Horario", ["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"], key="in_ran")   
+            c_dir = st.text_input("Dirección de Envío", placeholder="Calle, Ciudad o Coordenadas (-27.12, -55.12)", key="in_dir")
+            # NUEVO RANGO HORARIO AGREGADO ACÁ
+            c_ran = st.selectbox("Rango Horario", ["07:00-08:00", "08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"], key="in_ran")   
 
         if st.button("Guardar Pedido", type="primary"):
             if not c_nom: 
@@ -209,11 +166,14 @@ with tab1:
             else:
                 total = calcular_total(c_bat, c_mem, PRECIO_DOCENA, PRECIO_MEDIA)
                 lat, lon = obtener_coordenadas(c_dir) if c_dir else (None, None)
+                # Limpieza de caracteres en el teléfono por si el usuario puso espacios o guiones
+                telefono_limpio = re.sub(r'\D', '', c_tel) if c_tel else None
+                
                 supabase.table("pedidos").insert({
-                    "campana_id": ID_CAMPANA, "cliente_nombre": c_nom, "docenas_batata": c_bat,
-                    "docenas_membrillo": c_mem, "total_calculado": total, "estado_pago": c_pag,
-                    "metodo_pago": c_met, "modalidad_entrega": c_mod, "direccion_envio": c_dir, "rango_horario": c_ran,
-                    "latitud": lat, "longitud": lon
+                    "campana_id": ID_CAMPANA, "cliente_nombre": c_nom, "telefono": telefono_limpio, 
+                    "docenas_batata": c_bat, "docenas_membrillo": c_mem, "total_calculado": total, 
+                    "estado_pago": c_pag, "metodo_pago": c_met, "modalidad_entrega": c_mod, 
+                    "direccion_envio": c_dir, "rango_horario": c_ran, "latitud": lat, "longitud": lon
                 }).execute()
                 st.rerun()   
 
@@ -232,8 +192,14 @@ with tab1:
             c3.metric("Total", decimal_a_fraccion(b_t + m_t))    
 
             st.subheader("📋 Gestión de Pedidos")
-            # Vista limpia: Excluye explícitamente direccion_envio y rango_horario para evitar ruido visual
-            df_ed = df[["id", "cliente_nombre", "docenas_batata", "docenas_membrillo", "estado_pago", "metodo_pago", "modalidad_entrega", "total_calculado"]].copy()            
+            
+            # Generar URL de WhatsApp al vuelo para la tabla
+            if "telefono" in df.columns:
+                df["WhatsApp"] = df["telefono"].apply(lambda x: f"https://wa.me/549{x}" if pd.notnull(x) and x != "" else None)
+            else:
+                df["WhatsApp"] = None
+
+            df_ed = df[["id", "cliente_nombre", "WhatsApp", "docenas_batata", "docenas_membrillo", "estado_pago", "metodo_pago", "modalidad_entrega", "total_calculado"]].copy()            
 
             df_ed["estado_pago"] = df_ed["estado_pago"].replace([None, "", "nan"], "Pendiente")
             df_ed["metodo_pago"] = df_ed["metodo_pago"].replace([None, "", "nan"], "N/A")
@@ -244,6 +210,7 @@ with tab1:
                 df_ed, 
                 column_config={
                     "id": None, 
+                    "WhatsApp": st.column_config.LinkColumn("WhatsApp", display_text="💬 Enviar Mensaje"),
                     "total_calculado": st.column_config.NumberColumn("Total ($)", disabled=True),
                     "modalidad_entrega": st.column_config.SelectboxColumn("Entrega", options=["Retiro_Local", "Envio_Domicilio"], required=True),
                     "estado_pago": st.column_config.SelectboxColumn("Pago", options=["Pendiente", "Pagado"], required=True),
@@ -258,6 +225,11 @@ with tab1:
                     for idx_str, mods in state["edited_rows"].items():
                         idx = int(idx_str)
                         rid = df_ed.iloc[idx]["id"]
+                        
+                        # No intentamos guardar la columna virtual de WhatsApp en DB
+                        if "WhatsApp" in mods:
+                            del mods["WhatsApp"]
+                            
                         if mods.get("modalidad_entrega") == "Retiro_Local":
                             mods.update({"direccion_envio": None, "rango_horario": None, "latitud": None, "longitud": None})
                         if "docenas_batata" in mods or "docenas_membrillo" in mods:
@@ -275,15 +247,14 @@ with tab1:
             df_excel = df.copy()
             df_excel["Batata"] = df_excel["docenas_batata"].apply(decimal_a_fraccion)
             df_excel["Membrillo"] = df_excel["docenas_membrillo"].apply(decimal_a_fraccion)
-            excel_data = exportar_excel(df_excel[["cliente_nombre", "Batata", "Membrillo", "total_calculado", "estado_pago", "modalidad_entrega"]])
+            excel_data = exportar_excel(df_excel[["cliente_nombre", "telefono", "Batata", "Membrillo", "total_calculado", "estado_pago", "modalidad_entrega"]])
 
-            st.download_button("📥 Descargar Planilla Excel (Formato A4)", data=excel_data, file_name=f"pedidos_{campana_activa}.xlsx")
+            st.download_button("📥 Descargar Planilla Excel", data=excel_data, file_name=f"pedidos_{campana_activa}.xlsx")
 
             st.divider()
             with st.expander("⚠️ Zona de Peligro: Eliminar todos los pedidos"):
                 st.error("Alerta: Esta acción eliminará permanentemente todos los pedidos de la campaña activa.")
                 confirm = st.checkbox("Confirmar eliminación masiva")
-
                 if confirm:
                     if st.button("🚨 Ejecutar Borrado Total", type="primary"):
                         supabase.table("pedidos").delete().eq("campana_id", ID_CAMPANA).execute()
@@ -371,7 +342,8 @@ with tab3:
                         "Incluir": st.column_config.CheckboxColumn("Incluir", default=True),
                         "rango_horario": st.column_config.SelectboxColumn(
                             "Horario",
-                            options=["08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"]
+                            # NUEVO RANGO HORARIO AGREGADO ACÁ TAMBIÉN
+                            options=["07:00-08:00", "08:00-09:00", "09:00-10:00", "10:00-11:00", "11:00-12:00", "12:00-13:00"]
                         )
                     },
                     hide_index=True,
@@ -381,43 +353,52 @@ with tab3:
                 col_l1, col_l2 = st.columns(2)
 
                 # =====================================
-                # ACTUALIZAR LOGISTICA
+                # ACTUALIZAR LOGISTICA (BOTÓN INTELIGENTE)
                 # =====================================
                 if col_l1.button("📍 Actualizar Logística"):
                     hubo_cambios = False
                     for idx, row in res_log.iterrows():
                         rid = row["id"]
-                        direccion = row["direccion_envio"]
+                        direccion_nueva = row["direccion_envio"]
                         rango = row["rango_horario"]
 
+                        # Chequea la DB para no reprocesar filas que no fueron modificadas
+                        pedido_db = next((p for p in pedidos_req.data if p["id"] == rid), None)
+                        if pedido_db:
+                            dir_vieja = pedido_db.get("direccion_envio")
+                            lat_vieja = pedido_db.get("latitud")
+                            if direccion_nueva == dir_vieja and lat_vieja is not None:
+                                continue # Ignora esta fila, ahorra tiempo y bloqueos de API
+
                         datos_update = {
-                            "direccion_envio": direccion,
+                            "direccion_envio": direccion_nueva,
                             "rango_horario": rango
                         }
 
-                        if direccion:
-                            lat, lon = obtener_coordenadas(direccion)
+                        if direccion_nueva:
+                            lat, lon = obtener_coordenadas(direccion_nueva)
                             
                             if lat is not None and lon is not None:
-                                datos_update.update({
-                                    "latitud": lat,
-                                    "longitud": lon
-                                })
-                                st.success(f"✅ Coordenadas encontradas para: {direccion}")
+                                datos_update.update({"latitud": lat, "longitud": lon})
+                                st.toast(f"✅ Ok: {direccion_nueva}")
                             else:
-                                st.warning(f"⚠️ No se pudo localizar: {direccion}")
+                                st.warning(f"⚠️ Falló: {direccion_nueva}")
+
+                            # Solo hace pausa si procesó un texto real. Si pegaste coordenadas a mano, saltea la espera.
+                            if not re.search(r'(-?\d{1,2}\.\d+)[,\s]+(-?\d{1,3}\.\d+)', str(direccion_nueva)):
+                                time.sleep(1.5)
 
                         # Limpieza estricta de NaN
                         datos_update = {k: (None if pd.isna(v) else v) for k, v in datos_update.items()}
-                        
-                        response = supabase.table("pedidos").update(datos_update).eq("id", rid).execute()
+                        supabase.table("pedidos").update(datos_update).eq("id", rid).execute()
                         hubo_cambios = True
-                        time.sleep(1) # Límite para no saturar Photon
 
                     if hubo_cambios:
                         st.session_state.datos_ruta_cache = None
-                        st.success("✅ Logística actualizada")
+                        st.success("✅ Logística actualizada (Solo se procesaron los cambios)")
                         st.rerun()
+                    else:
+                        st.info("No detecté modificaciones. Nada que actualizar.")
 
                 # =====================================
                 # GENERAR RUTA OPTIMA
@@ -454,15 +435,13 @@ with tab3:
                             
                             body_dir = {
                                 "coordinates": coords_ors,
-                                "radiuses": [1500] * len(coords_ors) # Expande radio de búsqueda de ORS
+                                "radiuses": [1500] * len(coords_ors)
                             }
 
                             res_dir = requests.post(url_dir, json=body_dir, headers=headers, timeout=30)
 
                             if res_dir.status_code == 200:
                                 geojson = res_dir.json()
-                                
-                                # GUARDADO ESTRUCTURAL CORRECTO (Datos, no el objeto)
                                 st.session_state.datos_ruta_cache = {
                                     "origen": [ORIGEN_LAT, ORIGEN_LON],
                                     "clientes": pedidos_ruta,
