@@ -130,7 +130,7 @@ if campanas_df.empty:
     st.info("Configura una campaña en la última pestaña.")
     st.stop()
 
-campana_activa = st.sidebar.selectbox("Campaña", campanas_df['nombre_campana'].tolist())
+campana_activa = st.sidebar.selectbox("Campaña", campanas_df['nombre_campana'].tolist(), index=len(campanas_df) - 1)
 datos_c = campanas_df[campanas_df['nombre_campana'] == campana_activa].iloc[0]
 ID_CAMPANA, PRECIO_DOCENA, PRECIO_MEDIA = datos_c['id'], float(datos_c['precio_docena']), float(datos_c['precio_media'])
 
